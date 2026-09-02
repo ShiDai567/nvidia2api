@@ -3,7 +3,20 @@ services:
     build: .
     ports:
       - "3000:3000"
-    env_file: .env
+    environment:
+      - DEBUG=false
+      - SECRET_KEY=change-me-in-production
+      - ALLOWED_HOSTS=*
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=admin123
+      - ADMIN_TOKEN=dev-admin-token
+      - NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+      - DEFAULT_NVIDIA_RPM=40
+      - PROXY_TIMEOUT=10
+      - UPSTREAM_CONNECT_TIMEOUT=10
+      - UPSTREAM_READ_TIMEOUT=120
+      - MAX_CONCURRENT_REQUESTS=100
+      - LOG_LEVEL=INFO
     volumes:
       - ./data:/app/data
     restart: unless-stopped
