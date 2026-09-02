@@ -1,5 +1,5 @@
-export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
+// 默认同源请求，由 Next.js rewrites 反代到内部 Django；本地开发可设 NEXT_PUBLIC_API_BASE_URL 直连后端
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "";
 
 export const TOKEN_KEY = "nvidia2api_admin_token";
 

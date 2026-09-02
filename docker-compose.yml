@@ -1,23 +1,9 @@
 services:
-  backend:
+  nvidia2api:
     build: .
     ports:
-      - "8000:8000"
+      - "3000:3000"
     env_file: .env
     volumes:
       - ./data:/app/data
-    restart: unless-stopped
-
-  frontend:
-    image: node:22-slim
-    working_dir: /fe
-    command: sh -c "npm install && npm run build && npm run start"
-    volumes:
-      - ./frontend:/fe
-    ports:
-      - "3000:3000"
-    environment:
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
-    depends_on:
-      - backend
     restart: unless-stopped

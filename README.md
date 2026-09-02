@@ -2,7 +2,7 @@
 
 针对 NVIDIA AI API 的 API 聚合、代理加速、Key 池管理、代理池管理与 OpenAI 兼容中转平台。
 
-![cover](doc/img/cover.png)
+![cover](docs/img/cover.png)
 
 ## 功能
 
@@ -55,7 +55,7 @@ npm run dev                     # http://localhost:3000
 docker compose up -d
 ```
 
-SQLite 数据保存在 `./data`（已挂载到容器 `/app/data`）。
+单镜像运行前后端：仅暴露 Next.js `3000` 端口，Django 只监听容器内 `127.0.0.1:8000`，由 Next.js rewrites 将 `/api`、`/v1` 反代到后端。SQLite 数据保存在 `./data`（已挂载到容器 `/app/data`）。
 
 ## 使用流程
 
@@ -98,7 +98,6 @@ Key 的 RPM 计数使用 SQLite 条件更新（`UPDATE ... WHERE count < rpm_lim
 ## 环境变量
 
 见 `.env.example`。
-
 
 ## 文档
 

@@ -1,20 +1,29 @@
-# nvidia2api all-in-one image: Django backend + built Next.js frontend static export
-# Stage 1: build frontend
+# nvidia2api all-in-one image: Django (127.0.0.1:8000, internal) + Next.js (:3000, only exposed port)
+# Stage 1: build frontend standalone
 FROM node:22-slim AS fe
 WORKDIR /fe
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm install
 COPY frontend/ .
-ENV NEXT_PUBLIC_API_BASE_URL=""
 RUN npm run build
 
-# Stage 2: backend
-FROM python:3.12-slim
+# Stage 2: runtime (Node for Next.js + Python for Django, same container)
+FROM node:22-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 python3-pip \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1 DATA_DIR=/app/data
-COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+
+COPY backend/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 COPY backend/ .
-COPY --from=fe /fe/out /app/static/frontend
-EXPOSE 8000
-CMD ["sh", "-c", "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"]
+
+# Next.js standalone server + static assets
+COPY --from=fe /fe/.next/standalone ./frontend
+COPY --from=fe /fe/.next/static ./frontend/.next/static
+COPY --from=fe /fe/public ./frontend/public
+
+EXPOSE 3000
+# Django 只监听 127.0.0.1，容器外不可达；对外仅暴露 Next.js 3000 端口
+CMD ["sh", "-c", "python3 manage.py migrate && (uvicorn config.asgi:application --host 127.0.0.1 --port 8000 &) && cd frontend && HOSTNAME=0.0.0.0 PORT=3000 node server.js"]
