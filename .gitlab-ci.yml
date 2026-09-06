@@ -17,8 +17,8 @@ docker-build:
   before_script:
     - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
   script:
-    # 确定镜像 tag：Tag 推送用 Tag 名，分支推送用分支名 + latest(默认分支)
-    - >
+    - |
+      # 确定镜像 tag：Tag 推送用 Tag 名，分支推送用分支名 + latest(默认分支)
       if [ -n "$CI_COMMIT_TAG" ]; then
         TAGS="--tag $IMAGE:$CI_COMMIT_TAG --tag $IMAGE:latest"
       elif [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
@@ -27,17 +27,13 @@ docker-build:
         SAFE_BRANCH=$(echo "$CI_COMMIT_BRANCH" | tr '/-' '__')
         TAGS="--tag $IMAGE:$SAFE_BRANCH --tag $IMAGE:$CI_COMMIT_SHORT_SHA"
       fi
-    - echo "Building with tags: $TAGS"
-    - >
-      docker build
-      --pull
-      --cache-from "$IMAGE:latest"
-      $TAGS
-      --label "org.opencontainers.image.revision=$CI_COMMIT_SHA"
-      --label "org.opencontainers.image.source=$CI_PROJECT_URL"
-      .
-    # 推送所有 tag
-    - docker push --all-tags "$IMAGE"
+      echo "Building with tags: $TAGS"
+      docker build --pull --cache-from "$IMAGE:latest" \
+        $TAGS \
+        --label "org.opencontainers.image.revision=$CI_COMMIT_SHA" \
+        --label "org.opencontainers.image.source=$CI_PROJECT_URL" \
+        .
+      docker push --all-tags "$IMAGE"
   rules:
     - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_BRANCH
