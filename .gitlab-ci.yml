@@ -18,6 +18,9 @@ docker-build:
     - name: docker:27-dind
       alias: docker
       pull_policy: if-not-present
+      # DinD 守护进程的启动参数：配置 Docker Hub 镜像加速器
+      # 注意：Dockerfile 里的 FROM 拉取发生在 DinD 内部，宿主机的 mirror 配置对它无效
+      command: ["--registry-mirror=https://docker.1ms.run"]
   before_script:
     - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
   script:
