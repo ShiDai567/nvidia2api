@@ -42,8 +42,9 @@ docker-build:
         .
       docker push --all-tags "$IMAGE"
   rules:
+    # 仅在打 Tag 时自动构建镜像
     - if: $CI_COMMIT_TAG
-    - if: $CI_COMMIT_BRANCH
+    # 普通分支推送不触发；Merge Request 提供手动触发入口
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       when: manual
 

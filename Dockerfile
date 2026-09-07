@@ -6,6 +6,8 @@ WORKDIR /fe
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ .
+# 确保 public 目录存在（Git 不跟踪空目录，frontend/public 可能为空）
+RUN mkdir -p public && touch public/.gitkeep
 RUN npm run build
 
 # Stage 2: runtime (Node for Next.js + Python for Django, same container)
