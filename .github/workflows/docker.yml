@@ -16,7 +16,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
 
     steps:
@@ -65,3 +65,31 @@ jobs:
       - name: Smoke test (failed builds only)
         if: failure() == false && github.event_name == 'pull_request'
         run: docker version
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            docker-compose.yml
+            .env.example
+            LICENSE
+          body: |
+            ## nvidia2api ${{ github.ref_name }}
+
+            ### Docker 镜像
+
+            ```bash
+            docker pull ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            ```
+
+            ### 部署
+
+            ```bash
+            curl -O https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/docker-compose.yml
+            docker compose up -d
+            ```

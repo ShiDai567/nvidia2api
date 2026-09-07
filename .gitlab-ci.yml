@@ -1,5 +1,6 @@
 stages:
   - build
+  - release
 
 variables:
   IMAGE: $CI_REGISTRY_IMAGE/nvidia2api
@@ -47,6 +48,41 @@ docker-build:
     # 普通分支推送不触发；Merge Request 提供手动触发入口
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       when: manual
+
+# Tag 触发时创建 GitLab Release（含镜像地址说明与部署产物）
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs: ["docker-build"]
+  rules:
+    - if: $CI_COMMIT_TAG
+  script:
+    - echo "Creating GitLab Release $CI_COMMIT_TAG"
+  release:
+    tag_name: $CI_COMMIT_TAG
+    name: "Release $CI_COMMIT_TAG"
+    description: |
+      ## nvidia2api $CI_COMMIT_TAG
+
+      ### Docker 镜像
+
+      ```bash
+      docker pull $IMAGE:$CI_COMMIT_TAG
+      docker pull $IMAGE:latest
+      ```
+
+      ### 部署
+
+      ```bash
+      curl -O $CI_PROJECT_URL/-/raw/$CI_COMMIT_TAG/docker-compose.yml
+      docker compose up -d
+      ```
+    assets:
+      links:
+        - name: "Docker Compose 配置"
+          url: "$CI_PROJECT_URL/-/raw/$CI_COMMIT_TAG/docker-compose.yml"
+        - name: "环境变量示例"
+          url: "$CI_PROJECT_URL/-/raw/$CI_COMMIT_TAG/.env.example"
 
 # 可选：多架构构建（需要 buildkit + builder 支持，取消注释按需使用）
 # docker-build-multiarch:
