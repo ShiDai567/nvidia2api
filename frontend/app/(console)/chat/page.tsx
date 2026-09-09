@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bot, Brain, ChevronDown, ChevronRight, CornerDownLeft, Loader2, Trash2, Zap } from "lucide-react";
+import { Bot, Brain, ChevronDown, ChevronRight, CornerDownLeft, Loader2, Trash2 } from "lucide-react";
 import { AdminChatResponse, API_BASE_URL, api, asList, getToken, Model } from "@/lib/api";
 import { Button, Card, PageHeader, Select } from "@/components/ui";
+import { Markdown } from "@/components/markdown";
 import { toast } from "@/components/toaster";
 
 interface ChatMessage {
@@ -12,6 +13,9 @@ interface ChatMessage {
   reasoning?: string;
   meta?: AdminChatResponse["meta"];
 }
+
+const MESSAGES_KEY = "nvidia2api_chat_messages";
+const MODEL_KEY = "nvidia2api_chat_model";
 
 const THINK_RE = /<think>([\s\S]*?)<\/think>/i;
 
@@ -28,13 +32,55 @@ function splitReasoning(raw: string, explicitReasoning?: string) {
   return { reasoning: "", content: raw };
 }
 
+function loadStoredMessages(): ChatMessage[] {
+  try {
+    const raw = localStorage.getItem(MESSAGES_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter(
+        (m): m is ChatMessage =>
+          m &&
+          typeof m.content === "string" &&
+          (m.role === "user" || m.role === "assistant"),
+      );
+    }
+  } catch {
+    // ignore corrupted storage
+  }
+  return [];
+}
+
 export default function ChatPage() {
   const [models, setModels] = useState<Model[]>([]);
   const [model, setModel] = useState("");
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [restored, setRestored] = useState(false);
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // 中途退出后重新进入：恢复上次对话内容与模型选择
+  useEffect(() => {
+    setMessages(loadStoredMessages());
+    setModel(localStorage.getItem(MODEL_KEY) ?? "");
+    setRestored(true);
+  }, []);
+
+  // 对话内容（含流式过程中的中间状态）实时落盘，刷新/退出不丢失
+  useEffect(() => {
+    if (!restored) return;
+    try {
+      if (messages.length) localStorage.setItem(MESSAGES_KEY, JSON.stringify(messages));
+      else localStorage.removeItem(MESSAGES_KEY);
+    } catch {
+      // storage full / unavailable — ignore
+    }
+  }, [messages, restored]);
+
+  useEffect(() => {
+    if (model) localStorage.setItem(MODEL_KEY, model);
+  }, [model]);
 
   useEffect(() => {
     api
@@ -43,7 +89,10 @@ export default function ChatPage() {
       .then((list) => {
         const enabled = list.filter((m) => m.enabled);
         setModels(enabled);
-        if (enabled[0]) setModel(enabled[0].model_name);
+        // 已恢复的模型选择仍然有效时保留，否则用第一个可用模型
+        setModel((cur) =>
+          cur && enabled.some((m) => m.model_name === cur) ? cur : (enabled[0]?.model_name ?? ""),
+        );
       })
       .catch((e) => toast.error(e.message));
   }, []);
@@ -198,9 +247,11 @@ export default function ChatPage() {
                   }
                 >
                   {m.reasoning && <ReasoningBlock text={m.reasoning} />}
-                  {m.content
+                  {m.role === "user"
                     ? <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
-                    : <p className="text-gray-600">&nbsp;</p>}
+                    : m.content
+                      ? <Markdown>{m.content}</Markdown>
+                      : <p className="text-gray-600">&nbsp;</p>}
                   {m.meta && (
                     <div className="mt-2 border-t border-white/10 pt-2 text-[11px] text-gray-500">
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">

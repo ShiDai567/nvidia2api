@@ -17,7 +17,7 @@ frontend/
 │       ├── dashboard/          # 仪表盘 + Token 图表
 │       ├── chat/               # 对话（流式 + 思考展示 + Token 统计）
 │       ├── nvidia-keys/        # Key CRUD + 批量导入 + 测试 + 显隐
-│       ├── proxies/            # 代理 CRUD/导入/测速/IP + 启用上限
+│       ├── proxies/            # 代理 CRUD/导入/一键检测/获取 IP + 启用上限
 │       ├── proxy-groups/       # 分组 CRUD
 │       ├── models/             # 列表/同步/启停
 │       ├── api-keys/           # 用户 Key CRUD（rate_limit 0=不限）

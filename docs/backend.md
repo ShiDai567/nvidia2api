@@ -16,7 +16,7 @@ backend/
 |---|---|
 | `key_service.py` | bulk_import（去重/自动命名）、`claim_rpm_slot`（条件更新）、`report_failure` 状态机（401→invalid，429→rate_limited+60s 冷却，其余 60s 冷却）、脱敏 |
 | `proxy_service.py` | `bulk_import_proxies`、`set_enabled`（**强制 enabled ≤ keys-1**）、`report_proxy_result`（连续 3 败 → unhealthy + 冷却）、`schedulable_proxies`（排除 cooldown/unhealthy，按延迟排序） |
-| `proxy_checker.py` | `check_proxy`（走代理访问 ipinfo.io，测延迟+IP+地理）、`check_all`（Semaphore(20) 并发） |
+| `proxy_checker.py` | `check_proxy`（多源 IP/地理探测，风控不计失败）、`check_proxy_retry`（换源重试）、`check_all`（一键检测：Semaphore(5) + 错峰启动，风控单独计数） |
 | `load_balancer.py` | `build_routes`：线路数 = min(启用代理数+1, 可用 Key 数, max_routes)；第 i 个代理配第 i 个 Key，最后一条直连 |
 | `race_engine.py` | 竞速与流式竞速（见 race-engine.md） |
 | `api_key_service.py` | `generate_key`（sk-nvidia2api-36hex）、hash 查询、可选限流（rate_limit>0 时每分钟窗口） |

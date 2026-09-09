@@ -52,6 +52,9 @@ export default function NvidiaKeysPage() {
 
   useEffect(() => {
     load();
+    // 本分钟请求数每分钟重置，定时刷新保持展示准确
+    const timer = setInterval(load, 5000);
+    return () => clearInterval(timer);
   }, [load]);
 
   async function doImport() {

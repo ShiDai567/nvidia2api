@@ -13,7 +13,7 @@ from apps.core.models import (
     RequestLog, SystemSetting, UserApiKey,
 )
 from services import api_key_service, key_service, nvidia_service, proxy_service
-from services.proxy_checker import check_all, check_proxy
+from services.proxy_checker import check_all, check_proxy_retry
 
 from .auth import AdminRequiredMixin
 from .serializers import (
@@ -232,20 +232,20 @@ class ProxyDetailView(AdminRequiredMixin, APIView):
         return Response(status=204)
 
 
-class ProxyTestView(AdminRequiredMixin, APIView):
+class ProxyFetchIpView(AdminRequiredMixin, APIView):
+    """获取代理公网 IP 与归属地（多次尝试，风控响应不计为代理失败）。"""
+
     def post(self, request, pk):
         try:
             p = Proxy.objects.get(pk=pk)
         except Proxy.DoesNotExist:
             return Response({"detail": "not found"}, status=404)
-        return Response(proxy_service.run_async(check_proxy(p)))
+        return Response(proxy_service.run_async(check_proxy_retry(p)))
 
 
-class ProxyFetchIpView(ProxyTestView):
-    pass  # check_proxy already performs IP + geo lookup
+class ProxyCheckAllView(AdminRequiredMixin, APIView):
+    """一键检测全部启用代理（低并发 + 错峰，防风控；风控不计失败）。"""
 
-
-class ProxyTestAllView(AdminRequiredMixin, APIView):
     def post(self, request):
         return Response(proxy_service.run_async(check_all()))
 

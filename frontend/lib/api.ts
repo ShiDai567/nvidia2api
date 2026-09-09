@@ -135,8 +135,9 @@ export interface Proxy {
   city?: string;
   enabled: boolean;
   status: string;
-  latency: number | null;
-  last_check_time: string | null;
+  latency_ms: number | null;
+  last_check_at: string | null;
+  consecutive_failures?: number;
   public_ip?: string;
   success_count: number;
   failure_count: number;

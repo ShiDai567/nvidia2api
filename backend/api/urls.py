@@ -21,10 +21,9 @@ urlpatterns = [
 
     path("api/admin/proxies", admin_views.ProxyListView.as_view()),
     path("api/admin/proxies/import", admin_views.ProxyImportView.as_view()),
-    path("api/admin/proxies/test-all", admin_views.ProxyTestAllView.as_view()),
     path("api/admin/proxies/<int:pk>", admin_views.ProxyDetailView.as_view()),
-    path("api/admin/proxies/<int:pk>/test", admin_views.ProxyTestView.as_view()),
     path("api/admin/proxies/<int:pk>/fetch-ip", admin_views.ProxyFetchIpView.as_view()),
+    path("api/admin/proxies/check-all", admin_views.ProxyCheckAllView.as_view()),
 
     path("api/admin/proxy-groups", admin_views.ProxyGroupListView.as_view()),
     path("api/admin/proxy-groups/<int:pk>", admin_views.ProxyGroupDetailView.as_view()),

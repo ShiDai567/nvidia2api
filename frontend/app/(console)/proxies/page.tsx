@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Gauge, Globe, Pencil, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
+import { Activity, Globe, Pencil, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
 import { api, asList, NvidiaKey, Proxy, ProxyGroup } from "@/lib/api";
 import {
   Badge,
@@ -32,7 +32,7 @@ export default function ProxiesPage() {
   const [importText, setImportText] = useState("");
   const [editItem, setEditItem] = useState<Partial<Proxy> | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
-  const [testingAll, setTestingAll] = useState(false);
+  const [checkingAll, setCheckingAll] = useState(false);
 
   const maxProxies = Math.max(keyCount - 1, 0);
 
@@ -73,22 +73,15 @@ export default function ProxiesPage() {
     }
   }
 
-  async function testOne(p: Proxy) {
-    setBusyId(p.id);
-    try {
-      await api.post(`/api/admin/proxies/${p.id}/test`, {});
-      await load();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "测速失败");
-    } finally {
-      setBusyId(null);
-    }
-  }
-
   async function fetchIp(p: Proxy) {
     setBusyId(p.id);
     try {
-      await api.post(`/api/admin/proxies/${p.id}/fetch-ip`, {});
+      const res = await api.post<{ ok?: boolean; rate_limited?: boolean; error?: string }>(
+        `/api/admin/proxies/${p.id}/fetch-ip`,
+        {},
+      );
+      if (res.rate_limited) toast.error("探测源触发风控，代理状态未变更，请稍后重试");
+      else if (!res.ok && res.error) toast.error(res.error);
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "获取 IP 失败");
@@ -97,15 +90,29 @@ export default function ProxiesPage() {
     }
   }
 
-  async function testAll() {
-    setTestingAll(true);
+  async function checkAll() {
+    setCheckingAll(true);
     try {
-      await api.post("/api/admin/proxies/test-all", {});
+      const res = await api.post<{ total?: number; ok?: number; failed?: number; rate_limited?: number }>(
+        "/api/admin/proxies/check-all",
+        {},
+      );
+      const total = res.total ?? 0;
+      const ok = res.ok ?? 0;
+      const rl = res.rate_limited ?? 0;
+      const failed = res.failed ?? 0;
+      const parts = [`正常 ${ok}`];
+      if (rl) parts.push(`风控 ${rl}`);
+      if (failed) parts.push(`失败 ${failed}`);
+      const msg = `一键检测完成（${total} 个启用代理）：${parts.join("，")}`;
+      if (failed) toast.error(msg);
+      else if (rl) toast.info(msg);
+      else toast.success(msg);
       await load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "测速失败");
+      toast.error(e instanceof Error ? e.message : "检测失败");
     } finally {
-      setTestingAll(false);
+      setCheckingAll(false);
     }
   }
 
@@ -163,9 +170,10 @@ export default function ProxiesPage() {
             <Button onClick={() => setImportOpen(true)}>
               <Upload size={14} /> 批量导入
             </Button>
-            <Button onClick={testAll} loading={testingAll}>
-              <Gauge size={14} /> 全部测速
+            <Button onClick={checkAll} loading={checkingAll}>
+              <Activity size={14} /> 一键检测
             </Button>
+
             <Button
               variant="primary"
               onClick={() => setEditItem({ protocol: "socks5", port: 0 })}
@@ -213,7 +221,7 @@ export default function ProxiesPage() {
             <Th>延迟</Th>
             <Th>状态</Th>
             <Th>启用</Th>
-            <Th>最后测速</Th>
+            <Th>最后检测</Th>
             <Th>操作</Th>
           </>
         }
@@ -232,7 +240,7 @@ export default function ProxiesPage() {
             <Td className="text-gray-400">{p.group_name || "—"}</Td>
             <Td className="font-mono text-xs text-gray-400">{p.public_ip || "—"}</Td>
             <Td className="text-gray-400">{p.country || "—"}</Td>
-            <Td>{fmtLatency(p.latency)}</Td>
+            <Td>{fmtLatency(p.latency_ms)}</Td>
             <Td>
               <Badge status={p.status} />
             </Td>
@@ -243,17 +251,9 @@ export default function ProxiesPage() {
                 onChange={(v) => setEnabled(p, v)}
               />
             </Td>
-            <Td className="text-xs text-gray-500">{fmtTime(p.last_check_time)}</Td>
+            <Td className="text-xs text-gray-500">{fmtTime(p.last_check_at)}</Td>
             <Td>
               <div className="flex items-center gap-1">
-                <button
-                  title="测速"
-                  disabled={busyId === p.id}
-                  onClick={() => testOne(p)}
-                  className="rounded p-1.5 text-gray-500 hover:bg-white/10 hover:text-gray-200"
-                >
-                  <Gauge size={14} />
-                </button>
                 <button
                   title="获取 IP"
                   disabled={busyId === p.id}

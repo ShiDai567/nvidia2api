@@ -48,9 +48,8 @@ import 返回 `{success, duplicate, invalid, failed, errors[]}`。
 | GET | `/api/admin/proxies` | 列表 + summary（nvidia_keys、max_enabled_proxies、enabled、total_routes） |
 | POST | `/api/admin/proxies` / `import` | 新增 / 批量导入（格式同 Key，`socks5://user:pass@host:port`） |
 | PATCH | `/api/admin/proxies/{id}` | 改字段；`{"enabled":true}` 超过 N−1 上限时返回 400 `proxy_limit_exceeded` |
-| POST | `/api/admin/proxies/{id}/test` | 单条测速（连接+延迟+IP） |
-| POST | `/api/admin/proxies/{id}/fetch-ip` | 同上（别名） |
-| POST | `/api/admin/proxies/test-all` | 并发全部测速（Semaphore 20） |
+| POST | `/api/admin/proxies/{id}/fetch-ip` | 获取公网 IP + 归属地（多源回退，风控不计失败） |
+| POST | `/api/admin/proxies/check-all` | 一键检测全部启用代理（低并发 + 错峰防风控；返回 `{total, ok, failed, rate_limited}`） |
 | DELETE | `/api/admin/proxies/{id}` | 删除 |
 
 ## 分组
