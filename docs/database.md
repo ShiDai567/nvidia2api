@@ -5,9 +5,8 @@ SQLite，默认文件 `data/db.sqlite3`（可用 `DATABASE_PATH` 覆盖）。后
 ## ER 概览
 
 ```
-ProxyGroup 1 ──── n Proxy
 UserApiKey 1 ──── n RequestLog
-NvidiaApiKey / AIModel / SystemSetting（独立）
+NvidiaApiKey / Proxy / AIModel / SystemSetting（独立）
 ```
 
 ## 表结构
@@ -27,9 +26,9 @@ NvidiaApiKey / AIModel / SystemSetting（独立）
 | last_used_at | datetime | LRU 排序键 |
 | last_error | varchar(256) | 最近一次错误摘要 |
 
-### proxy_group / proxy
+### proxy
 
-Proxy 字段：`protocol`(`socks5|socks5h|http|https`)、`host`、`port`、`username`、`password`、`group_id`、`country/region/city/isp`、`enabled`、`status`(`unknown|healthy|degraded|unhealthy|disabled`)、`latency_ms`、`public_ip`、`last_check_at`、`success/failure_count`、`consecutive_failures`、`cooldown_until`。
+Proxy 字段：`protocol`(`socks5|socks5h|http|https`)、`host`、`port`、`username`、`password`、`country/region/city/isp`、`enabled`、`status`(`unknown|healthy|degraded|unhealthy|disabled`)、`latency_ms`、`public_ip`、`last_check_at`、`success/failure_count`、`consecutive_failures`、`cooldown_until`。
 
 唯一约束 `(protocol, host, port, username)`，索引 `(enabled, status)`。
 

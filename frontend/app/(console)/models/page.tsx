@@ -53,7 +53,12 @@ export default function ModelsPage() {
   async function sync() {
     setSyncing(true);
     try {
-      await api.post("/api/admin/models/sync", {});
+      const res = await api.post<{ created?: number; existing?: number; retired?: number }>(
+        "/api/admin/models/sync", {},
+      );
+      const parts = [`新增 ${res.created ?? 0}`, `已存在 ${res.existing ?? 0}`];
+      if (res.retired) parts.push(`已下架 ${res.retired}`);
+      toast.success(`同步完成：${parts.join("，")}`);
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "同步失败");
@@ -155,7 +160,11 @@ export default function ModelsPage() {
             <Td className="text-gray-400">{m.display_name || "—"}</Td>
             <Td className="text-gray-400">{m.provider || "nvidia"}</Td>
             <Td>
-              <Badge status={m.enabled ? "enabled" : "disabled"} />
+              {m.status === "retired" ? (
+                <Badge status="retired" />
+              ) : (
+                <Badge status={m.enabled ? "enabled" : "disabled"} />
+              )}
             </Td>
             <Td>
               <Toggle

@@ -3,6 +3,29 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
+def _load_dotenv(path: Path) -> None:
+    """Load a simple KEY=VALUE file into os.environ (existing env wins).
+
+    Local development convenience only: Docker/compose injects real env vars,
+    and real environment variables always take precedence over the file.
+    """
+    if not path.is_file():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip().strip("'\"")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+# 本地裸跑（manage.py/uvicorn）不经过 docker-compose，读不到根目录 .env；
+# 这里做可选加载：文件存在则导入（已 export 的环境变量优先），不存在则跳过。
+_load_dotenv(BASE_DIR.parent / ".env")
+
 # The race engine performs short, serialized SQLite writes from an asyncio
 # (single-thread) event loop. DB calls are brief and safe here.
 os.environ.setdefault("DJANGO_ALLOW_ASYNC_UNSAFE", "true")
@@ -40,6 +63,8 @@ DATABASES = {
 TEMPLATES = []
 USE_TZ = True
 LANGUAGE_CODE = "en-us"
+# 按本地时区切分"今日"/近 N 天统计；默认 Asia/Shanghai，可用环境变量覆盖。
+TIME_ZONE = os.environ.get("TIME_ZONE", "Asia/Shanghai")
 DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
 
 REST_FRAMEWORK = {

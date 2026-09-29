@@ -43,19 +43,6 @@ class NvidiaApiKey(Timestamped):
         return self.name
 
 
-class ProxyGroup(Timestamped):
-    name = models.CharField(max_length=64, unique=True)
-    description = models.CharField(max_length=256, blank=True, default="")
-    country = models.CharField(max_length=64, blank=True, default="")
-    enabled = models.BooleanField(default=True)
-
-    class Meta:
-        db_table = "proxy_group"
-
-    def __str__(self):
-        return self.name
-
-
 class ProxyStatus(models.TextChoices):
     UNKNOWN = "unknown", "Unknown"
     HEALTHY = "healthy", "Healthy"
@@ -71,9 +58,6 @@ class Proxy(Timestamped):
     port = models.IntegerField()
     username = models.CharField(max_length=128, blank=True, default="")
     password = models.CharField(max_length=128, blank=True, default="")
-    group = models.ForeignKey(
-        ProxyGroup, null=True, blank=True, on_delete=models.SET_NULL, related_name="proxies"
-    )
     country = models.CharField(max_length=64, blank=True, default="")
     region = models.CharField(max_length=64, blank=True, default="")
     city = models.CharField(max_length=64, blank=True, default="")

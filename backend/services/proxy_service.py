@@ -1,4 +1,4 @@
-"""Proxy management: import, parse, enable-limit enforcement, groups."""
+"""Proxy management: import, parse, enable-limit enforcement."""
 from __future__ import annotations
 
 import asyncio
@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 from django.db import transaction
 from django.utils import timezone
 
-from apps.core.models import NvidiaApiKey, NvidiaApiKeyStatus, Proxy, ProxyGroup, ProxyStatus
+from apps.core.models import NvidiaApiKey, NvidiaApiKeyStatus, Proxy, ProxyStatus
 
 logger = logging.getLogger("nvidia2api.proxy")
 
@@ -132,7 +132,7 @@ def report_proxy_result(proxy_id: int, success: bool, latency_ms: float | None =
 def schedulable_proxies() -> list[Proxy]:
     """Enabled, not in cooldown, healthy-ish proxies, best first."""
     now = timezone.now()
-    qs = Proxy.objects.filter(enabled=True).select_related("group")
+    qs = Proxy.objects.filter(enabled=True)
     out = []
     for p in qs:
         if p.cooldown_until and p.cooldown_until > now:
@@ -145,10 +145,6 @@ def schedulable_proxies() -> list[Proxy]:
         p.failure_count,
     ))
     return out
-
-
-def add_group(name: str, **kwargs) -> ProxyGroup:
-    return ProxyGroup.objects.create(name=name, **kwargs)
 
 
 def run_async(coro):

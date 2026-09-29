@@ -90,6 +90,7 @@ const badgeColors: Record<string, string> = {
   failed: "bg-red-500/15 text-red-400 border-red-500/30",
   invalid: "bg-red-500/15 text-red-400 border-red-500/30",
   disabled: "bg-gray-500/15 text-gray-400 border-gray-500/30",
+  retired: "bg-purple-500/15 text-purple-400 border-purple-500/30",
   unknown: "bg-gray-500/15 text-gray-400 border-gray-500/30",
   unknown_status: "bg-blue-500/15 text-blue-400 border-blue-500/30",
 };
@@ -106,6 +107,7 @@ const badgeLabels: Record<string, string> = {
   failed: "失败",
   invalid: "无效",
   disabled: "禁用",
+  retired: "已下架",
   unknown: "未知",
 };
 

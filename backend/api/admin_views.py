@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.models import (
-    AIModel, NvidiaApiKey, NvidiaApiKeyStatus, Proxy, ProxyGroup, ProxyStatus,
+    AIModel, NvidiaApiKey, NvidiaApiKeyStatus, Proxy, ProxyStatus,
     RequestLog, SystemSetting, UserApiKey,
 )
 from services import api_key_service, key_service, nvidia_service, proxy_service
@@ -18,7 +18,7 @@ from services.proxy_checker import check_all, check_proxy_retry
 
 from .auth import AdminRequiredMixin, check_login_allowed, note_login_failure
 from .serializers import (
-    ModelSerializer, NvidiaKeySerializer, ProxyGroupSerializer, ProxySerializer,
+    ModelSerializer, NvidiaKeySerializer, ProxySerializer,
     ProxyWriteSerializer, RequestLogSerializer, SettingSerializer, UserApiKeySerializer,
 )
 
@@ -151,59 +151,9 @@ class NvidiaKeyTestView(AdminRequiredMixin, APIView):
 
 # ---------------------------------------------------------------- proxies
 
-class ProxyGroupListView(AdminRequiredMixin, APIView):
-    def get(self, request):
-        qs = ProxyGroup.objects.annotate(proxy_count=Count("proxies")).order_by("id")
-        return Response(ProxyGroupSerializer(qs, many=True).data)
-
-    def post(self, request):
-        name = (request.data.get("name") or "").strip()
-        if not name:
-            return Response({"error": {"message": "name required", "code": "bad_request"}}, status=400)
-        if ProxyGroup.objects.filter(name=name).exists():
-            return Response({"error": {"message": "duplicate group", "code": "duplicate"}}, status=400)
-        g = ProxyGroup.objects.create(
-            name=name,
-            description=request.data.get("description", ""),
-            country=request.data.get("country", ""),
-            enabled=request.data.get("enabled", True),
-        )
-        data = ProxyGroupSerializer(g).data
-        data["proxy_count"] = 0
-        return Response(data, status=201)
-
-
-class ProxyGroupDetailView(AdminRequiredMixin, APIView):
-    def _get(self, pk):
-        try:
-            return ProxyGroup.objects.get(pk=pk)
-        except ProxyGroup.DoesNotExist:
-            return None
-
-    def patch(self, request, pk):
-        g = self._get(pk)
-        if not g:
-            return Response({"detail": "not found"}, status=404)
-        for f in ("name", "description", "country", "enabled"):
-            if f in request.data:
-                setattr(g, f, request.data[f])
-        g.save()
-        data = ProxyGroupSerializer(g).data
-        data["proxy_count"] = Proxy.objects.filter(group=g).count()
-        return Response(data)
-
-    def delete(self, request, pk):
-        g = self._get(pk)
-        if not g:
-            return Response({"detail": "not found"}, status=404)
-        Proxy.objects.filter(group=g).update(group=None)
-        g.delete()
-        return Response(status=204)
-
-
 class ProxyListView(AdminRequiredMixin, APIView):
     def get(self, request):
-        qs = Proxy.objects.select_related("group").order_by("id")
+        qs = Proxy.objects.order_by("id")
         n_keys = NvidiaApiKey.objects.exclude(status=NvidiaApiKeyStatus.DISABLED).count()
         max_allowed = max(n_keys - 1, 0)
         enabled = qs.filter(enabled=True).count()
@@ -270,7 +220,7 @@ class ProxyBulkView(AdminRequiredMixin, APIView):
 class ProxyDetailView(AdminRequiredMixin, APIView):
     def _get(self, pk):
         try:
-            return Proxy.objects.select_related("group").get(pk=pk)
+            return Proxy.objects.get(pk=pk)
         except Proxy.DoesNotExist:
             return None
 
@@ -285,7 +235,7 @@ class ProxyDetailView(AdminRequiredMixin, APIView):
                 return Response(
                     {"error": {"message": msg, "code": "proxy_limit_exceeded"}}, status=400
                 )
-        for f in ("name", "protocol", "host", "port", "username", "group"):
+        for f in ("name", "protocol", "host", "port", "username"):
             if f in request.data:
                 setattr(p, f, request.data[f])
         if "password" in request.data:
@@ -354,10 +304,10 @@ class ModelSyncView(AdminRequiredMixin, APIView):
         try:
             return Response(nvidia_service.sync_models())
         except ValueError as exc:
-            msg = str(exc)
-            code = "no_available_key" if msg == "no_available_nvidia_key" else "upstream_error"
-            status = 503 if code == "no_available_key" else 502
-            return Response({"error": {"message": msg, "code": code}}, status=status)
+            return Response(
+                {"error": {"message": str(exc), "code": "upstream_error"}},
+                status=502,
+            )
 
 
 class ModelDetailView(AdminRequiredMixin, APIView):

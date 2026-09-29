@@ -10,8 +10,8 @@
 - **流式响应**：支持 `stream=true` SSE，首个有效 chunk 到达即判定 Winner 并转发，其余线路取消。失败时返回真实 502/503 状态码（而非 200 内嵌错误），SDK 可正常重试。
 - **连接复用**：全局共享事件循环 + httpx 连接池，代理/直连线路的 TCP+TLS 连接跨请求复用，显著降低重复握手延迟。
 - **Key 池**：NVIDIA Key CRUD、批量导入（`name---key` 或纯 `key`，自动去重/自动命名）、默认 40 RPM、服务端滑动窗口限流（SQLite 原子条件更新）、429/401/403/5xx 自动冷却与状态管理（冷却时间可在设置页调整）。
-- **代理池**：SOCKS5/HTTP/HTTPS（支持账号密码）、批量导入、分组、并发异步测速（延迟 + 公网 IP + 地理位置）、异常自动冷却；启用数量由后端强制 `≤ NVIDIA Key 数 - 1`（`N` 个 Key → 最多 `N-1` 代理 + 1 直连 = `N` 条线路）。
-- **模型管理**：从 NVIDIA 同步模型、启停控制，仅 `enabled=true` 的模型通过 OpenAI API 暴露。
+- **代理池**：SOCKS5/HTTP/HTTPS（支持账号密码）、批量导入、并发异步测速（延迟 + 公网 IP + 地理位置）、异常自动冷却；启用数量由后端强制 `≤ NVIDIA Key 数 - 1`（`N` 个 Key → 最多 `N-1` 代理 + 1 直连 = `N` 条线路）。
+- **模型管理**：从 NVIDIA 同步模型、启停控制，仅 `enabled=true` 的模型通过 OpenAI API 暴露。模型列表来自 NVIDIA 公开端点，**同步无需任何 Key**（空库也能同步）。同步与上游对齐：上游已下架的模型自动软下架（`status=retired` + 禁用，不删记录），上游恢复后自动清除标记。
 - **OpenAI 兼容 API**：`GET /v1/models`、`POST /v1/chat/completions`（含非流式与 `stream=true`）、`GET /health`。
 - **用户 API Key**：`sk-nvidia2api-*`，仅存 SHA-256 Hash（创建时完整展示一次），支持每 Key 独立限流、允许模型白名单（`allowed_models`）与统计。
 - **请求日志**：request_id、耗时、TTFT、Winner 线路、Key、代理、状态、Token 统计，敏感字段脱敏；支持分页、时间/模型/状态筛选；`python manage.py clean_logs` 定期清理。
@@ -28,7 +28,7 @@
 ```
 backend/     Django（config/ 配置、apps/core/ 数据模型、services/ 业务服务、
              api/ Admin + OpenAI API、tests/ 27 个测试）
-frontend/    Next.js 控制台（dashboard、nvidia-keys、proxies、proxy-groups、
+frontend/    Next.js 控制台（dashboard、nvidia-keys、proxies、
              models、api-keys、request-logs、settings、login）
 data/        SQLite 数据目录（Docker 卷挂载点）
 docs/        架构、数据库、模块、竞速引擎、Admin/OpenAI API、前端、部署
@@ -70,7 +70,7 @@ docker compose up -d
 ## 使用流程
 
 1. 登录控制台 → **NVIDIA Keys** → 批量导入 Key（`主账号01---nvapi-xxx` 或每行一个 `nvapi-xxx`，自动去重/自动命名）
-2. **Proxies** → 批量导入代理、测速、获取 IP、按分组启用（数量受 Key 数 - 1 限制）
+2. **Proxies** → 批量导入代理、测速、获取 IP、启用（数量受 Key 数 - 1 限制）
 3. **Models** → 点击「同步 NVIDIA 模型」，启用要暴露的模型
 4. **API Keys** → 创建用户 Key（完整 Key 仅显示一次）
 5. 用 OpenAI SDK 调用：

@@ -66,10 +66,6 @@ import 返回 `{success, duplicate, invalid, failed, errors[]}`。
 | POST | `/api/admin/proxies/check-all` | 一键检测全部启用代理（低并发 + 错峰防风控；返回 `{total, ok, failed, rate_limited}`） |
 | DELETE | `/api/admin/proxies/{id}` | 删除 |
 
-## 分组
-
-`GET/POST /api/admin/proxy-groups`、`PATCH/DELETE /api/admin/proxy-groups/{id}`。删除分组会把组内代理置为无分组。
-
 ## 模型
 
 | 方法 | 路径 | 说明 |

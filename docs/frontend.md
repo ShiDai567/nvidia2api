@@ -18,7 +18,6 @@ frontend/
 │       ├── chat/               # 对话（流式 + 思考展示 + Token 统计）
 │       ├── nvidia-keys/        # Key CRUD + 批量导入 + 测试 + 显隐
 │       ├── proxies/            # 代理 CRUD/导入/一键检测/获取 IP + 启用上限
-│       ├── proxy-groups/       # 分组 CRUD
 │       ├── models/             # 列表/同步/启停
 │       ├── api-keys/           # 用户 Key CRUD（rate_limit 0=不限）
 │       ├── request-logs/       # 日志列表 + 展开竞速明细
@@ -62,3 +61,20 @@ npm run dev   # http://localhost:3000
 ```
 
 后端默认 `http://127.0.0.1:8000`，跨端口走 `NEXT_PUBLIC_API_BASE_URL`。
+
+## 远程开发（Coder / code-server 代理域名）
+
+通过 `https://code-3000.example.com:7100` 这类代理域名访问 dev server 时，
+Next.js 15.2+ 会把非 localhost 来源视为跨域，拦截 `/_next/*`（页面 chunk 403、
+HMR WebSocket 连不上）。`next.config.mjs` 已做两件事：
+
+1. 读取 `ALLOWED_DEV_ORIGINS`（逗号分隔主机名，不含协议/端口）；
+2. 自动从 `VSCODE_PROXY_URI`（如 `https://code-{{port}}.elsworld.cn:7100/`）解析代理主机名。
+
+两者都满足则无需手工配置；否则在 `.env` 或 shell 里设置：
+
+```bash
+ALLOWED_DEV_ORIGINS=code-3000.example.com
+```
+
+该配置仅影响 dev server，生产构建（standalone）不受影响。

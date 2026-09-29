@@ -20,14 +20,14 @@ backend/
 | `load_balancer.py` | `build_routes`：线路数 = min(启用代理数+1, 可用 Key 数, max_routes)；第 i 个代理配第 i 个 Key，最后一条直连 |
 | `race_engine.py` | 竞速与流式竞速（见 race-engine.md） |
 | `api_key_service.py` | `generate_key`（sk-nvidia2api-36hex）、hash 查询、可选限流（rate_limit>0 时每分钟窗口） |
-| `nvidia_service.py` | 上游 HTTP（`list_models`、`sync_models` 幂等 upsert） |
+| `nvidia_service.py` | 上游 HTTP（`list_models`、`sync_models` 幂等 upsert；`/v1/models` 是公开端点，同步默认不消耗/不依赖任何 Key）。同步与上游对齐：上游已下架的 nvidia 模型软下架（`status=retired`+禁用），上游恢复则清除标记，手动添加的非 nvidia 模型不受影响 |
 | `sysconfig.py` | 运行时参数注册表：`RUNTIME_PARAMS` 定义 (key, type, default, description)；`get()` 读 SystemSetting 覆盖 Settings；`set_params()` 批量写 |
 
 ## api/
 
 - `api/urls.py`：所有端点注册
 - `api/auth.py`：`admin_required`/`AdminRequiredMixin`（`Authorization: Token <ADMIN_TOKEN>`）、`openai_error()` 统一错误格式
-- `api/admin_views.py`：后台全部视图（登录/Keys/Proxies/Groups/Models/UserKeys/Logs/Dashboard/Usage/Settings/Chat）
+- `api/admin_views.py`：后台全部视图（登录/Keys/Proxies/Models/UserKeys/Logs/Dashboard/Usage/Settings/Chat）
 - `api/openai_views.py`：`/v1/models`、`/v1/chat/completions`，全局 `BoundedSemaphore(MAX_CONCURRENT_REQUESTS)`，OpenAI 错误码
 - `api/serializers.py`：所有序列化器；NVIDIA Key 默认脱敏，仅 `?reveal=1` 时返回明文
 

@@ -12,7 +12,6 @@ import {
   KeyRound,
   LayoutDashboard,
   LogOut,
-  Network,
   Settings,
 } from "lucide-react";
 import { clearToken, getToken } from "@/lib/api";
@@ -23,7 +22,6 @@ const NAV = [
   { href: "/chat", label: "对话", icon: MessageSquareText },
   { href: "/nvidia-keys", label: "NVIDIA Keys", icon: KeyRound },
   { href: "/proxies", label: "代理池", icon: Globe2 },
-  { href: "/proxy-groups", label: "代理分组", icon: Network },
   { href: "/models", label: "模型", icon: Boxes },
   { href: "/api-keys", label: "API Keys", icon: Activity },
   { href: "/request-logs", label: "请求日志", icon: FileClock },

@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from apps.core.models import (
-    AIModel, NvidiaApiKey, Proxy, ProxyGroup, RequestLog, SystemSetting, UserApiKey,
+    AIModel, NvidiaApiKey, Proxy, RequestLog, SystemSetting, UserApiKey,
 )
 from services.key_service import mask_key
 
@@ -29,25 +29,15 @@ class NvidiaKeySerializer(serializers.ModelSerializer):
         return max(obj.rpm_limit - obj.minute_request_count, 0)
 
 
-class ProxyGroupSerializer(serializers.ModelSerializer):
-    proxy_count = serializers.IntegerField(read_only=True, default=0)
-
-    class Meta:
-        model = ProxyGroup
-        fields = ["id", "name", "description", "country", "enabled", "proxy_count",
-                  "created_at", "updated_at"]
-
-
 class ProxySerializer(serializers.ModelSerializer):
     password = serializers.SerializerMethodField()
-    group_name = serializers.CharField(source="group.name", read_only=True, default="")
     url = serializers.SerializerMethodField()
 
     class Meta:
         model = Proxy
         fields = [
             "id", "name", "protocol", "host", "port", "username", "password",
-            "group", "group_name", "country", "region", "city", "isp", "enabled",
+            "country", "region", "city", "isp", "enabled",
             "status", "latency_ms", "public_ip", "last_check_at", "success_count",
             "failure_count", "consecutive_failures", "url", "created_at", "updated_at",
         ]
@@ -62,7 +52,7 @@ class ProxySerializer(serializers.ModelSerializer):
 class ProxyWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Proxy
-        fields = ["name", "protocol", "host", "port", "username", "password", "group"]
+        fields = ["name", "protocol", "host", "port", "username", "password"]
 
 
 class ModelSerializer(serializers.ModelSerializer):

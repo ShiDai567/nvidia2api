@@ -30,6 +30,10 @@ LOG_LEVEL=INFO
 
 # 前端直连后端地址
 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
+
+# 前端远程开发：经代理域名访问 dev server 时加入白名单（仅 dev 生效）
+# 主机名即可（不含协议/端口），逗号分隔；Coder 环境设置 VSCODE_PROXY_URI 可自动识别
+ALLOWED_DEV_ORIGINS=code-3000.elsworld.cn
 ```
 
 生产务必改 `SECRET_KEY`、`ADMIN_PASSWORD`、`ADMIN_TOKEN`。

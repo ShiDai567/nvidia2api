@@ -37,9 +37,6 @@ urlpatterns = [
     path("api/admin/proxies/<int:pk>/fetch-ip", admin_views.ProxyFetchIpView.as_view()),
     path("api/admin/proxies/check-all", admin_views.ProxyCheckAllView.as_view()),
 
-    path("api/admin/proxy-groups", admin_views.ProxyGroupListView.as_view()),
-    path("api/admin/proxy-groups/<int:pk>", admin_views.ProxyGroupDetailView.as_view()),
-
     path("api/admin/models", admin_views.ModelListView.as_view()),
     path("api/admin/models/sync", admin_views.ModelSyncView.as_view()),
     path("api/admin/models/<int:pk>", admin_views.ModelDetailView.as_view()),

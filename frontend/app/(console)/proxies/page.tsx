@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Activity, Globe, Pencil, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
-import { api, asList, NvidiaKey, Proxy, ProxyGroup } from "@/lib/api";
+import { api, asList, NvidiaKey, Proxy } from "@/lib/api";
 import {
   Badge,
   Button,
@@ -23,7 +23,6 @@ import { toast } from "@/components/toaster";
 
 export default function ProxiesPage() {
   const [proxies, setProxies] = useState<Proxy[]>([]);
-  const [groups, setGroups] = useState<ProxyGroup[]>([]);
   const [keyCount, setKeyCount] = useState(0);
   const [enabledCount, setEnabledCount] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -41,15 +40,13 @@ export default function ProxiesPage() {
     setLoading(true);
     setError("");
     try {
-      const [p, g, k] = await Promise.all([
+      const [p, k] = await Promise.all([
         api.get("/api/admin/proxies"),
-        api.get("/api/admin/proxy-groups"),
         api.get("/api/admin/nvidia-keys"),
       ]);
       const proxyList = asList<Proxy>(p);
       setProxies(proxyList);
       setEnabledCount(proxyList.filter((x) => x.enabled).length);
-      setGroups(asList<ProxyGroup>(g));
       setKeyCount(asList<NvidiaKey>(k).length);
       setSelected(new Set());
     } catch (e) {
@@ -186,7 +183,6 @@ export default function ProxiesPage() {
         protocol: editItem.protocol,
         host: editItem.host,
         port: editItem.port,
-        group: editItem.group ?? null,
         username: editItem.username ?? "",
       };
       // Only send password when the user actually typed one (mask = unchanged).
@@ -285,7 +281,6 @@ export default function ProxiesPage() {
             <Th>名称</Th>
             <Th>协议</Th>
             <Th>地址</Th>
-            <Th>分组</Th>
             <Th>公网 IP</Th>
             <Th>国家</Th>
             <Th>延迟</Th>
@@ -315,7 +310,6 @@ export default function ProxiesPage() {
             <Td className="font-mono text-xs text-gray-400">
               {p.host}:{p.port}
             </Td>
-            <Td className="text-gray-400">{p.group_name || "—"}</Td>
             <Td className="font-mono text-xs text-gray-400">{p.public_ip || "—"}</Td>
             <Td className="text-gray-400">{p.country || "—"}</Td>
             <Td>{fmtLatency(p.latency_ms)}</Td>
@@ -451,21 +445,6 @@ export default function ProxiesPage() {
               )}
             </Field>
           </div>
-          <Field label="分组">
-            <Select
-              value={editItem?.group ?? ""}
-              onChange={(e) =>
-                setEditItem((p) => ({ ...p, group: e.target.value ? Number(e.target.value) : null }))
-              }
-            >
-              <option value="">未分组</option>
-              {groups.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" onClick={() => setEditItem(null)}>
               取消

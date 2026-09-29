@@ -111,17 +111,6 @@ export interface NvidiaKey {
   updated_at: string;
 }
 
-export interface ProxyGroup {
-  id: number;
-  name: string;
-  description?: string;
-  country?: string;
-  enabled: boolean;
-  proxy_count?: number;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface Proxy {
   id: number;
   name: string;
@@ -131,8 +120,6 @@ export interface Proxy {
   username: string;
   /** 脱敏值：已设置时为 "••••••"，未设置为空串 */
   password: string;
-  group: number | null;
-  group_name?: string;
   country?: string;
   region?: string;
   city?: string;
