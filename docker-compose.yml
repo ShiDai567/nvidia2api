@@ -3,20 +3,20 @@ services:
     build: .
     ports:
       - "3000:3000"
+    # All runtime config comes from .env (cp .env.example .env and edit it).
+    # WARNING: change ADMIN_PASSWORD/ADMIN_TOKEN/SECRET_KEY before exposing
+    # this to any network; defaults are for first-boot convenience only.
+    env_file:
+      - .env
     environment:
-      - DEBUG=false
-      - SECRET_KEY=change-me-in-production
-      - ALLOWED_HOSTS=*
-      - ADMIN_USERNAME=admin
-      - ADMIN_PASSWORD=admin123
-      - ADMIN_TOKEN=dev-admin-token
-      - NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
-      - DEFAULT_NVIDIA_RPM=40
-      - PROXY_TIMEOUT=10
-      - UPSTREAM_CONNECT_TIMEOUT=10
-      - UPSTREAM_READ_TIMEOUT=120
-      - MAX_CONCURRENT_REQUESTS=100
-      - LOG_LEVEL=INFO
+      - DATA_DIR=/app/data
+      - DATABASE_PATH=/app/data/db.sqlite3
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s

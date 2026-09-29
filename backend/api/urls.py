@@ -1,8 +1,18 @@
+from django.http import JsonResponse
 from django.urls import path
+from django.views.decorators.csrf import csrf_exempt
 
 from . import admin_views, openai_views
 
+
+@csrf_exempt
+def health(request):
+    return JsonResponse({"status": "ok"})
+
+
 urlpatterns = [
+    path("health", health),
+
     # OpenAI-compatible
     path("v1/models", openai_views.list_models),
     path("v1/chat/completions", openai_views.chat_completions),
@@ -16,11 +26,13 @@ urlpatterns = [
 
     path("api/admin/nvidia-keys", admin_views.NvidiaKeyListView.as_view()),
     path("api/admin/nvidia-keys/import", admin_views.NvidiaKeyImportView.as_view()),
+    path("api/admin/nvidia-keys/bulk", admin_views.NvidiaKeyBulkView.as_view()),
     path("api/admin/nvidia-keys/<int:pk>", admin_views.NvidiaKeyDetailView.as_view()),
     path("api/admin/nvidia-keys/<int:pk>/test", admin_views.NvidiaKeyTestView.as_view()),
 
     path("api/admin/proxies", admin_views.ProxyListView.as_view()),
     path("api/admin/proxies/import", admin_views.ProxyImportView.as_view()),
+    path("api/admin/proxies/bulk", admin_views.ProxyBulkView.as_view()),
     path("api/admin/proxies/<int:pk>", admin_views.ProxyDetailView.as_view()),
     path("api/admin/proxies/<int:pk>/fetch-ip", admin_views.ProxyFetchIpView.as_view()),
     path("api/admin/proxies/check-all", admin_views.ProxyCheckAllView.as_view()),

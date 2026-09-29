@@ -169,11 +169,11 @@ def report_failure(key_id: int, error_type: str, http_status: int = 0):
         new_status = NvidiaApiKeyStatus.INVALID
     elif http_status == 429:
         new_status = NvidiaApiKeyStatus.RATE_LIMITED
-        cooldown_seconds = 60
+        cooldown_seconds = sysconfig.get("key_cooldown_seconds")
     elif error_type == "invalid_response":
-        cooldown_seconds = 30
+        cooldown_seconds = max(30, int(sysconfig.get("key_cooldown_seconds") / 2))
     else:  # timeout / network / 5xx
-        cooldown_seconds = 60
+        cooldown_seconds = sysconfig.get("key_cooldown_seconds")
     with transaction.atomic():
         key = NvidiaApiKey.objects.select_for_update().get(pk=key_id)
         key.failure_count += 1
@@ -187,7 +187,8 @@ def report_failure(key_id: int, error_type: str, http_status: int = 0):
             key.cooldown_until = now + timedelta(seconds=cooldown_seconds)
             fields.append("cooldown_until")
         key.save(update_fields=fields)
-    logger.info("key %s marked failure type=%s http=%s", key_id, error_type, http_status)
+    logger.info("key %s marked failure type=%s http=%s cooldown=%ss",
+                key_id, error_type, http_status, cooldown_seconds)
 
 
 def test_key(key: NvidiaApiKey) -> dict:

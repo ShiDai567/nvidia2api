@@ -75,9 +75,9 @@ class ModelSerializer(serializers.ModelSerializer):
 class UserApiKeySerializer(serializers.ModelSerializer):
     class Meta:
         model = UserApiKey
-        fields = ["id", "name", "key_prefix", "enabled", "rate_limit", "total_requests",
-                  "success_requests", "failed_requests", "last_used_at", "created_at",
-                  "updated_at"]
+        fields = ["id", "name", "key_prefix", "enabled", "rate_limit", "allowed_models",
+                  "total_requests", "success_requests", "failed_requests", "last_used_at",
+                  "created_at", "updated_at"]
 
 
 class RequestLogSerializer(serializers.ModelSerializer):

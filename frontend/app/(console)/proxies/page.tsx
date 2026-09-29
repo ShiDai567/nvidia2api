@@ -30,9 +30,10 @@ export default function ProxiesPage() {
   const [error, setError] = useState("");
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
-  const [editItem, setEditItem] = useState<Partial<Proxy> | null>(null);
+  const [editItem, setEditItem] = useState<(Partial<Proxy> & { _clearPassword?: boolean }) | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [checkingAll, setCheckingAll] = useState(false);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
 
   const maxProxies = Math.max(keyCount - 1, 0);
 
@@ -50,6 +51,7 @@ export default function ProxiesPage() {
       setEnabledCount(proxyList.filter((x) => x.enabled).length);
       setGroups(asList<ProxyGroup>(g));
       setKeyCount(asList<NvidiaKey>(k).length);
+      setSelected(new Set());
     } catch (e) {
       setError(e instanceof Error ? e.message : "加载失败");
     } finally {
@@ -60,6 +62,41 @@ export default function ProxiesPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  function toggleSelect(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const allSelected = proxies.length > 0 && selected.size === proxies.length;
+
+  async function bulk(action: "enable" | "disable" | "delete" | "check") {
+    const ids = [...selected];
+    if (!ids.length) return;
+    if (action === "delete" && !confirm(`确认删除选中的 ${ids.length} 个代理？`)) return;
+    try {
+      const res = await api.post<{ updated?: number; skipped?: number; deleted?: number }>(
+        "/api/admin/proxies/bulk",
+        { action, ids },
+      );
+      if (action === "enable" && res.skipped) {
+        toast.info(`已启用 ${res.updated} 个，${res.skipped} 个超出 Key 数量限制被跳过`);
+      } else if (action === "enable") {
+        toast.success(`已启用 ${res.updated ?? ids.length} 个代理`);
+      } else if (action === "disable") {
+        toast.success(`已禁用 ${res.updated ?? ids.length} 个代理`);
+      } else if (action === "delete") {
+        toast.success(`已删除 ${res.deleted ?? ids.length} 个代理`);
+      }
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "操作失败");
+    }
+  }
 
   async function setEnabled(p: Proxy, enabled: boolean) {
     setBusyId(p.id);
@@ -150,7 +187,14 @@ export default function ProxiesPage() {
         host: editItem.host,
         port: editItem.port,
         group: editItem.group ?? null,
+        username: editItem.username ?? "",
       };
+      // Only send password when the user actually typed one (mask = unchanged).
+      if (editItem.password && editItem.password !== "••••••") {
+        body.password = editItem.password;
+      } else if (editItem._clearPassword === true) {
+        body.password = ""; // explicit clear
+      }
       if (editItem.id) await api.patch(`/api/admin/proxies/${editItem.id}`, body);
       else await api.post("/api/admin/proxies", body);
       setEditItem(null);
@@ -193,17 +237,33 @@ export default function ProxiesPage() {
         </span>
         <span className="text-gray-400">
           启用代理：
-          <b className="text-accent">{enabledCount}</b>
+          <b className={enabledCount > maxProxies ? "text-red-400" : "text-accent"}>{enabledCount}</b>
           <span className="text-gray-600"> / {maxProxies}（最多）</span>
         </span>
         <span className="text-gray-400">直连线路：1</span>
         <span className="text-gray-400">
           当前总线路：<b className="text-gray-100">{Math.min(enabledCount, maxProxies) + 1}</b>
         </span>
-        {enabledCount >= maxProxies && maxProxies > 0 && (
+        {enabledCount > maxProxies && (
+          <span className="text-xs text-red-400">
+            已超出上限（Key 可能被删除过），多余代理不会被调度，请禁用 {enabledCount - maxProxies} 个
+          </span>
+        )}
+        {enabledCount === maxProxies && maxProxies > 0 && (
           <span className="text-xs text-amber-400">已达启用上限</span>
         )}
       </div>
+
+      {selected.size > 0 && (
+        <div className="glass mb-4 flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm">
+          <span className="text-gray-400">已选 {selected.size} 项：</span>
+          <Button variant="ghost" onClick={() => bulk("enable")}>批量启用</Button>
+          <Button variant="ghost" onClick={() => bulk("disable")}>批量禁用</Button>
+          <Button variant="ghost" onClick={() => bulk("check")}>批量测速</Button>
+          <Button variant="danger" onClick={() => bulk("delete")}>批量删除</Button>
+          <Button variant="ghost" onClick={() => setSelected(new Set())}>取消选择</Button>
+        </div>
+      )}
 
       {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
 
@@ -212,6 +272,16 @@ export default function ProxiesPage() {
         empty="暂无代理"
         head={
           <>
+            <Th className="w-8">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={(e) =>
+                  setSelected(e.target.checked ? new Set(proxies.map((p) => p.id)) : new Set())
+                }
+                className="accent-[var(--accent,#76B900)]"
+              />
+            </Th>
             <Th>名称</Th>
             <Th>协议</Th>
             <Th>地址</Th>
@@ -228,6 +298,14 @@ export default function ProxiesPage() {
       >
         {proxies.map((p) => (
           <tr key={p.id} className="hover:bg-white/[0.02]">
+            <Td>
+              <input
+                type="checkbox"
+                checked={selected.has(p.id)}
+                onChange={() => toggleSelect(p.id)}
+                className="accent-[var(--accent,#76B900)]"
+              />
+            </Td>
             <Td className="font-medium text-gray-200">{p.name}</Td>
             <Td>
               <code className="rounded bg-white/5 px-1.5 py-0.5 text-xs uppercase text-blue-300">
@@ -341,6 +419,36 @@ export default function ProxiesPage() {
                 onChange={(e) => setEditItem((p) => ({ ...p, port: Number(e.target.value) }))}
                 required
               />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="用户名（可选）">
+              <Input
+                value={editItem?.username ?? ""}
+                onChange={(e) => setEditItem((p) => ({ ...p, username: e.target.value }))}
+                placeholder="无认证则留空"
+              />
+            </Field>
+            <Field label="密码（可选）">
+              <Input
+                type="password"
+                value={editItem?.password ?? ""}
+                onChange={(e) => setEditItem((p) => ({ ...p, password: e.target.value }))}
+                placeholder={editItem?.id ? "留空保持不变（•••••• 为已设置）" : "无认证则留空"}
+              />
+              {editItem?.id && (
+                <label className="mt-1 flex items-center gap-1.5 text-xs text-gray-500">
+                  <input
+                    type="checkbox"
+                    checked={editItem?._clearPassword === true}
+                    onChange={(e) =>
+                      setEditItem((p) => p && ({ ...p, _clearPassword: e.target.checked, password: "" } as typeof p))
+                    }
+                    className="accent-[var(--accent,#76B900)]"
+                  />
+                  清除已保存的密码
+                </label>
+              )}
             </Field>
           </div>
           <Field label="分组">

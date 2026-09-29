@@ -104,18 +104,13 @@ def is_valid_stream_chunk(line: str) -> dict | None:
 # HTTP plumbing
 # ---------------------------------------------------------------------------
 
-def _client_kwargs(route: Route, stream: bool) -> dict:
+def _client_timeout() -> httpx.Timeout:
     from services import sysconfig
     read = sysconfig.get("upstream_read_timeout")
-    kwargs: dict[str, Any] = {
-        "timeout": httpx.Timeout(
-            connect=sysconfig.get("upstream_connect_timeout"),
-            read=read, write=read, pool=read,
-        ),
-    }
-    if route.proxy is not None:
-        kwargs["proxy"] = route.proxy.url
-    return kwargs
+    return httpx.Timeout(
+        connect=sysconfig.get("upstream_connect_timeout"),
+        read=read, write=read, pool=read,
+    )
 
 
 def _classify_error(exc: Exception) -> tuple[str, int]:
@@ -140,27 +135,29 @@ async def _do_request(route: Route, body: dict, base_url: str,
         "Authorization": f"Bearer {route.key.api_key}",
         "Content-Type": "application/json",
     }
+    from services.loop import acquire_client
+    client = acquire_client(route.proxy.url if route.proxy is not None else None,
+                            _client_timeout())
     try:
-        async with httpx.AsyncClient(**_client_kwargs(route, False)) as client:
-            resp = await client.post(
-                f"{base_url}/chat/completions", json=body, headers=headers
-            )
-            data: dict[str, Any] = {}
-            try:
-                data = resp.json()
-            except Exception:  # noqa: BLE001
-                _mark_failure(route, "invalid_json", resp.status_code)
-                return RaceResult(ok=False, route=route, http_status=resp.status_code,
-                                  error_type="invalid_json", latency_ms=_elapsed())
-            if not is_valid_response(resp.status_code, data):
-                typ = _classify_status(resp.status_code, data)
-                _mark_failure(route, typ, resp.status_code)
-                return RaceResult(ok=False, route=route, http_status=resp.status_code,
-                                  error_type=typ, latency_ms=_elapsed(),
-                                  error_message=str(data.get("error", ""))[:256])
-            _mark_success(route)
-            return RaceResult(ok=True, route=route, payload=data,
-                              http_status=resp.status_code, latency_ms=_elapsed())
+        resp = await client.post(
+            f"{base_url}/chat/completions", json=body, headers=headers
+        )
+        data: dict[str, Any] = {}
+        try:
+            data = resp.json()
+        except Exception:  # noqa: BLE001
+            _mark_failure(route, "invalid_json", resp.status_code)
+            return RaceResult(ok=False, route=route, http_status=resp.status_code,
+                              error_type="invalid_json", latency_ms=_elapsed())
+        if not is_valid_response(resp.status_code, data):
+            typ = _classify_status(resp.status_code, data)
+            _mark_failure(route, typ, resp.status_code)
+            return RaceResult(ok=False, route=route, http_status=resp.status_code,
+                              error_type=typ, latency_ms=_elapsed(),
+                              error_message=str(data.get("error", ""))[:256])
+        _mark_success(route)
+        return RaceResult(ok=True, route=route, payload=data,
+                          http_status=resp.status_code, latency_ms=_elapsed())
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -237,23 +234,27 @@ async def _race(routes: list[Route], body: dict, base_url: str) -> RaceResult:
 
 
 async def _stream_first_valid(route: Route, body: dict, base_url: str):
-    """Open a streaming connection; yield (client_ctx, response, first_chunk) on validity."""
+    """Open a streaming connection; yield (client_ctx, response, first_chunk) on validity.
+
+    Uses the pooled client; the response must be released (not closed) so the
+    underlying connection returns to the pool.
+    """
     headers = {
         "Authorization": f"Bearer {route.key.api_key}",
         "Content-Type": "application/json",
     }
-    cm = httpx.AsyncClient(**_client_kwargs(route, True))
-    client = await cm.__aenter__()
+    from services.loop import acquire_client
+    client = acquire_client(route.proxy.url if route.proxy is not None else None,
+                            _client_timeout())
+    resp_cm = client.stream(
+        "POST", f"{base_url}/chat/completions", json=body, headers=headers
+    )
     try:
-        req_cm = client.stream(
-            "POST", f"{base_url}/chat/completions", json=body, headers=headers
-        )
-        resp = await req_cm.__aenter__()
+        resp = await resp_cm.__aenter__()
         if resp.status_code != 200:
             typ = _classify_status(resp.status_code, {})
             _mark_failure(route, typ, resp.status_code)
-            await req_cm.__aexit__(None, None, None)
-            await cm.__aexit__(None, None, None)
+            await resp_cm.__aexit__(None, None, None)
             return None, route_info(route, "failed", error=typ, http_status=resp.status_code)
         first_line: str | None = None
         ait = resp.aiter_lines()
@@ -266,36 +267,38 @@ async def _stream_first_valid(route: Route, body: dict, base_url: str):
             # a data line present but invalid -> invalid response
             if line.startswith("data:"):
                 _mark_failure(route, "invalid_response", 200)
-                await req_cm.__aexit__(None, None, None)
-                await cm.__aexit__(None, None, None)
+                await resp_cm.__aexit__(None, None, None)
                 return None, route_info(route, "failed", error="invalid_response", http_status=200)
         if first_line is None:
             _mark_failure(route, "empty_stream", 200)
-            await req_cm.__aexit__(None, None, None)
-            await cm.__aexit__(None, None, None)
+            await resp_cm.__aexit__(None, None, None)
             return None, route_info(route, "failed", error="empty_stream", http_status=200)
         _mark_success(route)
-        return (cm, req_cm, resp, ait, first_line), None
+        return (client, resp_cm, resp, ait, first_line), None
     except asyncio.CancelledError:
-        await cm.__aexit__(None, None, None)
+        try:
+            await resp_cm.__aexit__(None, None, None)
+        except Exception:  # noqa: BLE001
+            pass
         raise
     except Exception as exc:  # noqa: BLE001
         typ, _ = _classify_error(exc)
         _mark_failure(route, typ, 0)
         try:
-            await cm.__aexit__(None, None, None)
+            await resp_cm.__aexit__(None, None, None)
         except Exception:  # noqa: BLE001
             pass
         return None, route_info(route, "failed", error=typ)
 
 
 def race_chat(routes: list[Route], body: dict, base_url: str) -> RaceResult:
-    """Synchronous entry: race non-streaming chat completion."""
-    return asyncio.run(_race(routes, body, base_url))
+    """Synchronous entry: race non-streaming chat completion on the shared loop."""
+    from services.loop import run_coroutine
+    return run_coroutine(_race(routes, body, base_url))
 
 
 async def race_stream_winner(routes: list[Route], body: dict, base_url: str):
-    """Race streaming connections; returns (route, cm, req_cm, resp, aiter, first_line, report)."""
+    """Race streaming connections; returns (route, client, resp_cm, resp, aiter, first_line, report)."""
     import time as _time
     if not routes:
         raise NoRouteAvailable()
@@ -322,8 +325,8 @@ async def race_stream_winner(routes: list[Route], body: dict, base_url: str):
                         report.append(route_info(
                             tasks[p], "cancelled",
                             (_time.monotonic() - t0) * 1000, "winner decided"))
-                    cm, req_cm, resp, ait, first_line = res
-                    return winner_route, cm, req_cm, resp, ait, first_line, report
+                    client, resp_cm, resp, ait, first_line = res
+                    return winner_route, client, resp_cm, resp, ait, first_line, report
                 if fail_info:
                     report.append(fail_info)
                 n_failed += 1
@@ -352,8 +355,8 @@ async def iter_sse(first_line: str, aiter, include_first: bool = True) -> AsyncI
 @dataclass
 class StreamWinner:
     route: Route
-    cm: Any
-    req_cm: Any
+    client: Any            # pooled httpx.AsyncClient (shared, never closed per request)
+    resp_cm: Any           # stream context manager; exited when the stream ends
     aiter: Any
     first_line: str
     report: list[dict] = None  # type: ignore[assignment]
@@ -363,17 +366,14 @@ class StreamWinner:
             yield chunk
 
     async def close(self):
+        """Release the streaming response back to the pool (client stays pooled)."""
         try:
-            await self.req_cm.__aexit__(None, None, None)
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            await self.cm.__aexit__(None, None, None)
+            await self.resp_cm.__aexit__(None, None, None)
         except Exception:  # noqa: BLE001
             pass
 
 
 async def race_stream(routes: list[Route], body: dict, base_url: str) -> StreamWinner:
-    route, cm, req_cm, resp, ait, first_line, report = await race_stream_winner(routes, body, base_url)
-    return StreamWinner(route=route, cm=cm, req_cm=req_cm, aiter=ait, first_line=first_line,
-                        report=report)
+    route, client, resp_cm, resp, ait, first_line, report = await race_stream_winner(routes, body, base_url)
+    return StreamWinner(route=route, client=client, resp_cm=resp_cm, aiter=ait,
+                        first_line=first_line, report=report)

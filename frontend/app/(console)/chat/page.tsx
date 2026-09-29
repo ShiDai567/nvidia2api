@@ -51,6 +51,12 @@ function loadStoredMessages(): ChatMessage[] {
   return [];
 }
 
+// Keep at most this many messages locally; older turns are trimmed (context
+// sent upstream is capped separately).
+const MAX_STORED_MESSAGES = 60;
+// How many recent turns are actually sent to the model per request.
+const MAX_CONTEXT_MESSAGES = 20;
+
 export default function ChatPage() {
   const [models, setModels] = useState<Model[]>([]);
   const [model, setModel] = useState("");
@@ -71,7 +77,7 @@ export default function ChatPage() {
   useEffect(() => {
     if (!restored) return;
     try {
-      if (messages.length) localStorage.setItem(MESSAGES_KEY, JSON.stringify(messages));
+      if (messages.length) localStorage.setItem(MESSAGES_KEY, JSON.stringify(messages.slice(-MAX_STORED_MESSAGES)));
       else localStorage.removeItem(MESSAGES_KEY);
     } catch {
       // storage full / unavailable — ignore
@@ -139,12 +145,15 @@ export default function ChatPage() {
         body: JSON.stringify({
           model,
           stream: true,
-          messages: history.map((m) => ({ role: m.role, content: m.content })),
+          // cap upstream context: only send the most recent turns
+          messages: history.slice(-MAX_CONTEXT_MESSAGES).map((m) => ({ role: m.role, content: m.content })),
         }),
       });
       if (!res.ok || !res.body) {
+        // non-SSE error responses (502/503/429…) now carry the real status code
         const err = await res.json().catch(() => ({}));
-        throw new Error(err?.error?.message || `HTTP ${res.status}`);
+        const msg = err?.error?.message || `HTTP ${res.status}`;
+        throw new Error(msg);
       }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -315,6 +324,8 @@ export default function ChatPage() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
+            // Don't send while an IME (中文输入法等) is composing
+            if (e.nativeEvent.isComposing) return;
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               void send();

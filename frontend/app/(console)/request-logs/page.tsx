@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, RefreshCw, Search } from "lucide-react";
-import { api, asList, RequestLog } from "@/lib/api";
+import { api, RequestLog } from "@/lib/api";
 import {
   Badge,
   Button,
@@ -16,32 +16,59 @@ import {
   Th,
 } from "@/components/ui";
 
+interface LogPage {
+  results: RequestLog[];
+  total: number;
+  limit: number;
+  offset: number;
+  next_offset: number | null;
+}
+
+const PAGE_SIZE = 100;
+
 export default function RequestLogsPage() {
   const [logs, setLogs] = useState<RequestLog[]>([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [model, setModel] = useState("");
   const [status, setStatus] = useState("");
+  const [since, setSince] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (off = 0) => {
     setLoading(true);
     setError("");
     try {
       const params = new URLSearchParams();
       if (model) params.set("model", model);
       if (status) params.set("status", status);
-      const qs = params.toString();
-      setLogs(asList<RequestLog>(await api.get(`/api/admin/logs${qs ? `?${qs}` : ""}`)));
+      if (since) {
+        // date input gives local midnight; send ISO with timezone
+        const d = new Date(`${since}T00:00:00`);
+        if (!Number.isNaN(d.getTime())) params.set("since", d.toISOString());
+      }
+      params.set("limit", String(PAGE_SIZE));
+      params.set("offset", String(off));
+      const res = await api.get<LogPage>(`/api/admin/logs?${params.toString()}`);
+      const page: LogPage = Array.isArray(res)
+        ? { results: res as unknown as RequestLog[], total: res.length, limit: PAGE_SIZE, offset: 0, next_offset: null }
+        : res;
+      setLogs(page.results ?? []);
+      setTotal(page.total ?? page.results?.length ?? 0);
+      setOffset(page.offset ?? 0);
+      setNextOffset(page.next_offset ?? null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "加载失败");
     } finally {
       setLoading(false);
     }
-  }, [model, status]);
+  }, [model, status, since]);
 
   useEffect(() => {
-    load();
+    load(0);
   }, [load]);
 
   return (
@@ -50,7 +77,7 @@ export default function RequestLogsPage() {
         title="请求日志"
         subtitle="用户请求与线路竞速记录"
         actions={
-          <Button onClick={load} loading={loading}>
+          <Button onClick={() => load(offset)} loading={loading}>
             <RefreshCw size={14} /> 刷新
           </Button>
         }
@@ -66,13 +93,36 @@ export default function RequestLogsPage() {
             onChange={(e) => setModel(e.target.value)}
           />
         </div>
-        <div className="w-40">
+        <div className="w-36">
           <Select value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="">全部状态</option>
             <option value="success">成功</option>
-            <option value="failed">失败</option>
+            <option value="error">失败</option>
           </Select>
         </div>
+        <div>
+          <Input
+            type="date"
+            value={since}
+            onChange={(e) => setSince(e.target.value)}
+            title="起始日期"
+          />
+        </div>
+        {(model || status || since) && (
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setModel("");
+              setStatus("");
+              setSince("");
+            }}
+          >
+            清除筛选
+          </Button>
+        )}
+        <span className="ml-auto text-xs text-gray-500">
+          共 {total.toLocaleString()} 条
+        </span>
       </div>
 
       {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
@@ -112,7 +162,7 @@ export default function RequestLogsPage() {
                   {l.model}
                 </Td>
                 <Td>{fmtLatency(l.duration_ms)}</Td>
-            <Td>{l.first_token_ms != null ? fmtLatency(l.first_token_ms) : "—"}</Td>
+                <Td>{l.first_token_ms != null ? fmtLatency(l.first_token_ms) : "—"}</Td>
                 <Td className="text-xs text-gray-400">
                   <span className="font-mono">{l.winner_proxy_name || l.winner_key_name ? `${l.winner_proxy_name || "直连"} + ${l.winner_key_name}` : "—"}</span>
                 </Td>
@@ -137,7 +187,7 @@ export default function RequestLogsPage() {
               </tr>
               {open && (
                 <tr className="bg-white/[0.02]">
-                  <Td colSpan={9} className="!py-3">
+                  <Td colSpan={10} className="!py-3">
                     <div className="space-y-1.5">
                       <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-400">
                         <span className="font-medium text-gray-300">请求明细</span>
@@ -189,6 +239,28 @@ export default function RequestLogsPage() {
           );
         })}
       </DataTable>
+
+      <div className="mt-4 flex items-center justify-between text-xs text-gray-500">
+        <span>
+          第 {offset + 1}-{Math.min(offset + PAGE_SIZE, total)} 条 / 共 {total.toLocaleString()} 条
+        </span>
+        <div className="flex gap-2">
+          <Button
+            variant="ghost"
+            disabled={offset === 0 || loading}
+            onClick={() => load(Math.max(offset - PAGE_SIZE, 0))}
+          >
+            上一页
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={nextOffset == null || loading}
+            onClick={() => nextOffset != null && load(nextOffset)}
+          >
+            下一页
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

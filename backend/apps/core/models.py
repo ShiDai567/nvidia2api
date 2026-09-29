@@ -131,6 +131,10 @@ class UserApiKey(Timestamped):
     key_prefix = models.CharField(max_length=32)
     enabled = models.BooleanField(default=True)
     rate_limit = models.IntegerField(default=0, help_text="requests per minute, 0 = unlimited")
+    allowed_models = models.JSONField(
+        default=list, blank=True,
+        help_text="model names this key may call; empty list = all enabled models",
+    )
     total_requests = models.IntegerField(default=0)
     success_requests = models.IntegerField(default=0)
     failed_requests = models.IntegerField(default=0)

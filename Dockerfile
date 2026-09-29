@@ -28,5 +28,6 @@ COPY --from=fe /fe/.next/static ./frontend/.next/static
 COPY --from=fe /fe/public ./frontend/public
 
 EXPOSE 3000
-# Django 只监听 127.0.0.1，容器外不可达；对外仅暴露 Next.js 3000 端口
-CMD ["sh", "-c", "python3 manage.py migrate && (uvicorn config.asgi:application --host 127.0.0.1 --port 8000 &) && cd frontend && HOSTNAME=0.0.0.0 PORT=3000 node server.js"]
+# Django listens on 127.0.0.1 only; Next.js (3000) is the single entry point.
+# If Django dies, the whole container should restart (restart: unless-stopped).
+CMD ["sh", "-c", "python3 manage.py migrate && python3 -m uvicorn config.asgi:application --host 127.0.0.1 --port 8000 & BACKEND_PID=$!; cd frontend && HOSTNAME=0.0.0.0 PORT=3000 node server.js & FRONT_PID=$!; trap 'kill $BACKEND_PID $FRONT_PID 2>/dev/null' TERM INT; wait -n $BACKEND_PID $FRONT_PID; exit 1"]

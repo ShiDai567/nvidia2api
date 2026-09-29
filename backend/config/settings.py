@@ -46,7 +46,15 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
 }
 
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS: the console talks to the backend same-origin via Next.js rewrites in
+# production, so CORS is only needed for local dev (Next :3000 -> Django :8000)
+# or explicit API-base deployments. Restrictable via CORS_ALLOWED_ORIGINS.
+_cors_origins = os.environ.get("CORS_ALLOWED_ORIGINS", "").strip()
+if _cors_origins:
+    CORS_ALLOWED_ORIGINS = [o.strip() for o in _cors_origins.split(",") if o.strip()]
+    CORS_ALLOW_ALL_ORIGINS = False
+else:
+    CORS_ALLOW_ALL_ORIGINS = True  # default deployment: single admin console, no cookies
 
 # --- nvidia2api settings ---
 NVIDIA_BASE_URL = os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")

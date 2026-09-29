@@ -6,6 +6,10 @@
 
 ## 端点
 
+### `GET /health`
+
+健康检查（无需鉴权）。
+
 ### `GET /v1/models`
 
 ```json
@@ -17,14 +21,16 @@
 }
 ```
 
-只包含 `enabled=true` 的模型。
+只包含 `enabled=true` 的模型；若用户 Key 配置了 `allowed_models`，只返回允许的模型。
 
 ### `POST /v1/chat/completions`
 
 支持的参数（透传 NVIDIA；未列出的会被丢弃）：`model`、`messages`、`temperature`、`top_p`、`max_tokens`、`stream`、`stop`、`n`、`seed`、`frequency_penalty`、`presence_penalty`、`response_format`、`tools`、`tool_choice`。
 
-- 非流式：直接返回 NVIDIA 原始 JSON
-- 流式：SSE，上游 chunk 透传，结尾 `data: [DONE]`
+- **非流式**：竞速在返回前完成——直接返回 NVIDIA 原始 JSON，或对应的错误状态码。
+- **流式**：竞速同样在返回前完成。所有线路失败时返回真实的 502/503 + OpenAI 风格 JSON 错误（**不会**返回 200 后在流里塞错误）；有 Winner 时返回 `200 + text/event-stream`，上游 chunk 透传，结尾 `data: [DONE]`。
+- 响应头 `X-Request-Id` 可用于在请求日志页定位记录。
+- 平台自动注入 `stream_options.include_usage` 以记录 token 用量（对用户透明）。
 
 ## 错误格式
 
@@ -34,15 +40,18 @@
 {"error": {"message": "…", "type": "api_error", "param": null, "code": "invalid_request"}}
 ```
 
-| HTTP | code |
-|---|---|
-| 400 | `invalid_request` |
-| 401 | `invalid_api_key` |
-| 403 | `key_disabled` |
-| 404 | `model_not_found` |
-| 429 | `rate_limit_exceeded` / `server_overloaded` |
-| 502 | `upstream_error` |
-| 503 | `no_available_route` |
+| HTTP | code | 备注 |
+|---|---|---|
+| 400 | `invalid_request` | |
+| 401 | `invalid_api_key` | |
+| 403 | `key_disabled` / `model_not_allowed` | Key 被禁用 / Key 的 allowed_models 不含该模型 |
+| 404 | `model_not_found` | 模型不存在或未在控制台启用 |
+| 413 | `payload_too_large` | 请求体 > 4MB |
+| 429 | `rate_limit_exceeded` / `server_overloaded` | 带 `Retry-After` 头 |
+| 502 | `upstream_error` | 所有线路均失败 |
+| 503 | `no_available_route` | 没有可用 NVIDIA Key/线路 |
+
+注：参数校验失败（400/403/404/413）不计入用户 Key 的配额。
 
 ## 调用示例
 

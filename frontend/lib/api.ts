@@ -128,6 +128,9 @@ export interface Proxy {
   protocol: string;
   host: string;
   port: number;
+  username: string;
+  /** 脱敏值：已设置时为 "••••••"，未设置为空串 */
+  password: string;
   group: number | null;
   group_name?: string;
   country?: string;
@@ -163,6 +166,7 @@ export interface UserApiKey {
   key_prefix: string;
   enabled: boolean;
   rate_limit: number;
+  allowed_models?: string[];
   total_requests: number;
   success_requests: number;
   failed_requests: number;
@@ -219,6 +223,7 @@ export interface DashboardStats {
   success_rate: number;
   avg_latency?: number;
   avg_latency_s?: number;
+  tokens_today?: number;
   active_requests?: number;
   key_status?: Record<string, number>;
   proxy_status?: Record<string, number>;

@@ -37,12 +37,14 @@ export default function NvidiaKeysPage() {
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [editItem, setEditItem] = useState<Partial<NvidiaKey> | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       setKeys(asList<NvidiaKey>(await api.get("/api/admin/nvidia-keys")));
+      setSelected(new Set());
     } catch (e) {
       setError(e instanceof Error ? e.message : "加载失败");
     } finally {
@@ -56,6 +58,32 @@ export default function NvidiaKeysPage() {
     const timer = setInterval(load, 5000);
     return () => clearInterval(timer);
   }, [load]);
+
+  function toggleSelect(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const allSelected = keys.length > 0 && selected.size === keys.length;
+
+  async function bulk(action: "enable" | "disable") {
+    const ids = [...selected];
+    if (!ids.length) return;
+    try {
+      const res = await api.post<{ updated?: number }>("/api/admin/nvidia-keys/bulk", {
+        action,
+        ids,
+      });
+      toast.success(`已${action === "enable" ? "启用" : "禁用"} ${res.updated ?? ids.length} 个 Key`);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "操作失败");
+    }
+  }
 
   async function doImport() {
     try {
@@ -107,7 +135,14 @@ export default function NvidiaKeysPage() {
   async function remove(k: NvidiaKey) {
     if (!confirm(`确认删除 ${k.name}？`)) return;
     try {
-      await api.del(`/api/admin/nvidia-keys/${k.id}`);
+      const res = await fetch(`/api/admin/nvidia-keys/${k.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Token ${localStorage.getItem("nvidia2api_admin_token") ?? ""}` },
+      });
+      const over = res.headers.get("X-Proxy-Over-Limit");
+      if (over && Number(over) > 0) {
+        toast.info(`Key 已删除。注意：当前启用的代理数已超出上限 ${over} 个，多余代理不会被调度。`);
+      }
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "删除失败");
@@ -117,8 +152,12 @@ export default function NvidiaKeysPage() {
   async function test(k: NvidiaKey) {
     setBusyId(k.id);
     try {
-      await api.post(`/api/admin/nvidia-keys/${k.id}/test`, {});
-      toast.success(`${k.name} 测试完成`);
+      const res = await api.post<{ ok?: boolean; http_status?: number; error?: string }>(
+        `/api/admin/nvidia-keys/${k.id}/test`,
+        {},
+      );
+      if (res.ok) toast.success(`${k.name} 连接正常`);
+      else toast.error(`${k.name} 测试失败：${res.error || `HTTP ${res.http_status ?? "?"}`}`);
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "测试失败");
@@ -147,6 +186,15 @@ export default function NvidiaKeysPage() {
         }
       />
 
+      {selected.size > 0 && (
+        <div className="glass mb-4 flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm">
+          <span className="text-gray-400">已选 {selected.size} 项：</span>
+          <Button variant="ghost" onClick={() => bulk("enable")}>批量启用</Button>
+          <Button variant="ghost" onClick={() => bulk("disable")}>批量禁用</Button>
+          <Button variant="ghost" onClick={() => setSelected(new Set())}>取消选择</Button>
+        </div>
+      )}
+
       {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
 
       <DataTable
@@ -154,6 +202,16 @@ export default function NvidiaKeysPage() {
         empty="暂无 Key，点击右上角添加或批量导入"
         head={
           <>
+            <Th className="w-8">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={(e) =>
+                  setSelected(e.target.checked ? new Set(keys.map((k) => k.id)) : new Set())
+                }
+                className="accent-[var(--accent,#76B900)]"
+              />
+            </Th>
             <Th>名称</Th>
             <Th>Key</Th>
             <Th>状态</Th>
@@ -170,6 +228,14 @@ export default function NvidiaKeysPage() {
           const enabled = k.enabled ?? k.status !== "disabled";
           return (
             <tr key={k.id} className="hover:bg-white/[0.02]">
+              <Td>
+                <input
+                  type="checkbox"
+                  checked={selected.has(k.id)}
+                  onChange={() => toggleSelect(k.id)}
+                  className="accent-[var(--accent,#76B900)]"
+                />
+              </Td>
               <Td className="font-medium text-gray-200">{k.name}</Td>
               <Td>
                 <code className="font-mono text-xs text-gray-500">{k.api_key}</code>

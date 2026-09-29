@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   Activity,
   Boxes,
+  Coins,
   Gauge,
   Globe2,
   KeyRound,
@@ -89,6 +90,9 @@ export default function DashboardPage() {
 
   useEffect(() => {
     load();
+    // 每 15 秒自动刷新一次，保持"实时并发"等指标更新
+    const timer = setInterval(load, 15000);
+    return () => clearInterval(timer);
   }, []);
 
   return (
@@ -114,36 +118,42 @@ export default function DashboardPage() {
         />
         <StatCard
           icon={Globe2}
-          label="Enabled Proxies"
+          label="已启用代理"
           value={stats ? `${stats.enabled_proxies} / ${stats.max_enabled_proxies ?? stats.max_proxies ?? 0}` : "—"}
           sub={`共 ${stats?.proxies ?? 0} 个代理`}
         />
         <StatCard
           icon={Boxes}
-          label="Models"
+          label="模型"
           value={stats ? `${stats.enabled_models} / ${stats.models}` : "—"}
           sub="启用 / 总数"
         />
         <StatCard
           icon={TrendingUp}
-          label="Requests Today"
+          label="今日请求"
           value={stats ? stats.requests_today.toLocaleString() : "—"}
         />
         <StatCard
           icon={Activity}
-          label="Active Requests"
-          value={stats?.active_requests ?? "—"}
-          sub="实时并发"
+          label="实时并发"
+          value={stats ? (stats.active_requests ?? "—") : "—"}
+          sub="当前进行中的请求数"
         />
         <StatCard
           icon={Gauge}
-          label="Success Rate"
+          label="成功率"
           value={stats ? `${Number(stats.success_rate ?? 0).toFixed(1)}%` : "—"}
         />
         <StatCard
           icon={Timer}
-          label="Avg Latency"
+          label="平均延迟"
           value={stats ? `${Number(stats.avg_latency_s ?? stats.avg_latency ?? 0).toFixed(2)}s` : "—"}
+        />
+        <StatCard
+          icon={Coins}
+          label="今日 Tokens"
+          value={stats ? fmtNum(stats.tokens_today ?? 0) : "—"}
+          sub="输入 + 输出"
         />
       </div>
 
