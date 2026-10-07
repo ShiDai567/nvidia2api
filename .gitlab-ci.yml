@@ -49,7 +49,11 @@ docker-build:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       when: manual
 
-# Tag 触发时创建 GitLab Release（含镜像地址说明与部署产物）
+# Tag 触发时创建 GitLab Release。说明(description)取自该 tag 对应的内容：
+# 优先用 tag 注解消息($CI_COMMIT_TAG_MESSAGE，即 git tag -a 写的信息)，
+# 轻量 tag 无注解时回退到提交信息($CI_COMMIT_MESSAGE)。
+# 因 release-cli 的 --description 支持读取文件（release: 关键字只能传字符串），
+# 这里改用 `release-cli create` 脚本方式以支持多行且可回退的说明。
 release:
   stage: release
   image: registry.gitlab.com/gitlab-org/release-cli:latest
@@ -57,32 +61,19 @@ release:
   rules:
     - if: $CI_COMMIT_TAG
   script:
-    - echo "Creating GitLab Release $CI_COMMIT_TAG"
-  release:
-    tag_name: $CI_COMMIT_TAG
-    name: "Release $CI_COMMIT_TAG"
-    description: |
-      ## nvidia2api $CI_COMMIT_TAG
-
-      ### Docker 镜像
-
-      ```bash
-      docker pull $IMAGE:$CI_COMMIT_TAG
-      docker pull $IMAGE:latest
-      ```
-
-      ### 部署
-
-      ```bash
-      curl -O $CI_PROJECT_URL/-/raw/$CI_COMMIT_TAG/docker-compose.yml
-      docker compose up -d
-      ```
-    assets:
-      links:
-        - name: "Docker Compose 配置"
-          url: "$CI_PROJECT_URL/-/raw/$CI_COMMIT_TAG/docker-compose.yml"
-        - name: "环境变量示例"
-          url: "$CI_PROJECT_URL/-/raw/$CI_COMMIT_TAG/.env.example"
+    - |
+      NOTES="${CI_COMMIT_TAG_MESSAGE:-${CI_COMMIT_MESSAGE:-}}"
+      cat > RELEASE_NOTES.md <<EOF
+      ${NOTES}
+      EOF
+      echo "Creating GitLab Release $CI_COMMIT_TAG (说明行数: $(wc -l < RELEASE_NOTES.md))"
+    - |
+      release-cli create \
+        --name "Release $CI_COMMIT_TAG" \
+        --tag-name "$CI_COMMIT_TAG" \
+        --description RELEASE_NOTES.md \
+        --assets-link "{\"name\":\"Docker Compose 配置\",\"url\":\"$CI_PROJECT_URL/-/raw/$CI_COMMIT_TAG/docker-compose.yml\"}" \
+        --assets-link "{\"name\":\"环境变量示例\",\"url\":\"$CI_PROJECT_URL/-/raw/$CI_COMMIT_TAG/.env.example\"}"
 
 # 可选：多架构构建（需要 buildkit + builder 支持，取消注释按需使用）
 # docker-build-multiarch:

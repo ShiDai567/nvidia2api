@@ -32,6 +32,7 @@ npm run build && npm run lint          # 提交前验证
 - 用户 API Key（`sk-nvidia2api-*`）只存 SHA-256 hash；Admin API 鉴权是固定 token：`Authorization: Bearer $ADMIN_TOKEN`（不是登录换短期 token）。
 - Docker 是单镜像：Django 只监听容器内 `127.0.0.1:8000`，Next.js (`output: "standalone"`) 通过 `next.config.mjs` rewrites 把 `/api`、`/v1` 反代给后端（后端地址取 `BACKEND_INTERNAL_URL`）。本地 dev 则前端调 `NEXT_PUBLIC_API_BASE_URL`。
 - **CI（`.gitlab-ci.yml`）只在打 Tag 时构建镜像并建 release**；MR 仅有手动触发入口。没有跑 lint/test 的 CI。
+- Release 说明取自 tag 内容：优先 tag 注解消息（`git tag -a`），轻量 tag 回退到 commit 信息——用 `release-cli create --description <文件>` 实现（`release:` 关键字只能传字符串，改回它就拿不到多行/回退逻辑）。
 - `httpx[socks]` + `httpx-socks` 两者都需要（SOCKS 代理支持）。
 - 默认管理员 `admin / admin123`（env 可改）。
 
