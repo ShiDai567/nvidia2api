@@ -13,7 +13,7 @@ from django.views.decorators.csrf import csrf_exempt
 from apps.core.models import AIModel, RequestLog
 from services import api_key_service, key_service
 from services.load_balancer import build_routes
-from services.loop import run_coroutine
+from services.loop import run_coroutine, submit_coroutine
 from services.race_engine import (
     AllRoutesFailed, NoRouteAvailable, race_chat,
 )
@@ -245,7 +245,7 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key):
         q.put(SENTINEL)
         q.put(usage)
 
-    run_coroutine(_pump())  # schedules the pump coroutine; returns immediately
+    submit_coroutine(_pump())  # schedule the pump; do NOT block on it
 
     def gen():
         usage: dict = {}

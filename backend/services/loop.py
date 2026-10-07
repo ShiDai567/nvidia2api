@@ -29,6 +29,11 @@ _thread: threading.Thread | None = None
 _clients: dict[str, httpx.AsyncClient] = {}
 _clients_lock: threading.Lock = threading.Lock()
 
+# Fire-and-forget coroutines (streaming pumps). Kept referenced until done so
+# the loop's task is never garbage-collected mid-flight.
+_pending: set = set()
+_pending_lock: threading.Lock = threading.Lock()
+
 
 def get_loop() -> asyncio.AbstractEventLoop:
     """Return the shared background loop, starting it on first use."""
@@ -60,6 +65,32 @@ def get_loop() -> asyncio.AbstractEventLoop:
 def run_coroutine(coro):
     """Submit a coroutine to the shared loop and block for its result."""
     return asyncio.run_coroutine_threadsafe(coro, get_loop()).result()
+
+
+def submit_coroutine(coro):
+    """Schedule a coroutine on the shared loop WITHOUT waiting for it.
+
+    Use this for long-lived streaming pumps: blocking on them (as
+    ``run_coroutine`` does) would drain the whole upstream stream before the
+    view returns its StreamingHttpResponse, so every SSE chunk would reach the
+    client at once instead of incrementally.
+    """
+    task = asyncio.run_coroutine_threadsafe(coro, get_loop())
+    with _pending_lock:
+        _pending.add(task)
+    task.add_done_callback(_discard)
+    return task
+
+
+def _discard(task) -> None:
+    with _pending_lock:
+        _pending.discard(task)
+    # Retrieve the result so a failure is not logged as "exception never
+    # retrieved"; upstream errors are already surfaced through the pump queue.
+    try:
+        task.result()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _client_key(proxy_url: str | None) -> str:

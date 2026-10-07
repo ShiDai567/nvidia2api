@@ -45,7 +45,7 @@ NVIDIA2API 是面向 NVIDIA AI API 的聚合代理平台：
 3. **SQLite 并发控制**：Key 的 RPM 计数用数据库侧条件 `UPDATE ... WHERE count < rpm_limit`，放弃 `SELECT FOR UPDATE`，避免 SQLite 锁升级死锁（detail 见 [database.md](database.md)）。
 4. **运行时参数优先于环境变量**：`SystemSetting` 表中的值覆盖 `.env`，改后即时生效（`sysconfig.py`）。
 5. **线路数 = 启用代理数 + 1 直连**：代理数量上限 = NVIDIA Key 数 − 1，由后端在 `set_enabled` 强制（不是前端校验）。
-6. **流式错误语义**：流式请求的竞速在返回响应对象**之前**完成——全部线路失败返回真实 502/503 JSON，Winner 确认后才返回 200 + SSE；chunk 通过线程安全队列从事件循环泵给 Django 生成器，事件循环永不被生成器阻塞。
+6. **流式错误语义**：流式请求的竞速在返回响应对象**之前**完成——全部线路失败返回真实 502/503 JSON，Winner 确认后才返回 200 + SSE；chunk 通过线程安全队列从事件循环泵给 Django 生成器，事件循环永不被生成器阻塞。注意泵送协程必须用 `submit_coroutine`（fire-and-forget）：若改成阻塞等待（`run_coroutine`），会把整条上游流先灌满队列才返回响应，客户端就会看到"全部一次性蹦出"而非逐字流式。
 
 ## 请求路径（聊天）
 

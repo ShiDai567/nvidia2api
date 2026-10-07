@@ -626,7 +626,7 @@ class AdminChatView(AdminRequiredMixin, APIView):
         from django.http import StreamingHttpResponse
 
         from services.load_balancer import build_routes
-        from services.loop import run_coroutine
+        from services.loop import run_coroutine, submit_coroutine
         from services.race_engine import AllRoutesFailed, NoRouteAvailable, race_stream
 
         routes = build_routes()
@@ -698,7 +698,7 @@ class AdminChatView(AdminRequiredMixin, APIView):
             q.put(SENTINEL)
             q.put(usage)
 
-        run_coroutine(_pump())
+        submit_coroutine(_pump())
 
         def gen():
             yield "data: " + json.dumps({

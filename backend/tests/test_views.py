@@ -145,6 +145,48 @@ class StreamingStatusTests(TestCase):
         self.assertIn('"content":"A"', body)
         self.assertIn("data: [DONE]", body)
 
+    def test_stream_pump_uses_non_blocking_submit(self):
+        """Regression: the pump must be fire-and-forget via ``submit_coroutine``.
+
+        Blocking on it (``run_coroutine``) drains the whole upstream stream into
+        the queue before the view returns, so every SSE chunk reaches the client
+        at once instead of incrementally.
+        """
+        async def fake_lines(self):
+            yield 'data: {"choices":[{"delta":{"content":"A"}}]}\n\n'
+            yield "data: [DONE]\n\n"
+
+        async def fake_race_stream(routes, body, base_url):
+            from services.load_balancer import Route
+            key = NvidiaApiKey(name="k1", api_key="nvapi-k1")
+            w = StreamWinner(
+                route=Route(kind="direct", key=key),
+                client=None, resp_cm=None, aiter=None,
+                first_line='data: {"choices":[{"delta":{"content":"A"}}]}',
+                report=[],
+            )
+            w.lines = fake_lines.__get__(w)  # type: ignore[method-assign]
+            return w
+
+        scheduled = []
+        import services.loop as loop_mod
+
+        def spy(coro):
+            scheduled.append(coro)
+            return loop_mod.submit_coroutine(coro)
+
+        with patch("services.race_engine.race_stream", fake_race_stream), \
+             patch("api.openai_views.submit_coroutine", spy, create=True):
+            resp = self._post_stream()
+            self.assertEqual(resp.status_code, 200)
+            # The view scheduled the pump without awaiting it.
+            self.assertEqual(len(scheduled), 1)
+            self.assertEqual(resp["Content-Type"], "text/event-stream")
+
+        body = b"".join(resp.streaming_content).decode()
+        self.assertIn('"content":"A"', body)
+        self.assertIn("data: [DONE]", body)
+
 
 class NonStreamingViewTests(TestCase):
     def setUp(self):

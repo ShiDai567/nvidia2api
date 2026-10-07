@@ -57,6 +57,15 @@ route_i ── open POST stream ──► 等第一个有效 SSE chunk
 
 只在第一条 `data:` 有效时才算 Winner；第一条 `data:` 无效直接判 `invalid_response`，不等完整流。
 
+### 转发（必须非阻塞）
+
+Winner 确认后，视图起一个"泵"协程把 `winner.lines()` 写入 `queue.Queue`，Django 生成器再从中逐条 `yield`。泵**必须**用 `services.loop.submit_coroutine()` 提交（fire-and-forget），不能用会阻塞到协程结束的 `run_coroutine()`：
+
+- 用 `submit_coroutine`：视图立即返回 `StreamingHttpResponse`，上游 chunk 边到边发（真正的逐字流式）。
+- 若误用 `run_coroutine`：视图会在返回响应前先把**整条上游流**读完塞进队列，客户端直到 `[DONE]` 才一次性收到全部内容（表现为"不流式"）。
+
+`race_stream_winner`（取 Winner）仍然用 `run_coroutine` 阻塞等待，以保证竞速失败时能返回真实的 502/503——只有"泵送"阶段需要非阻塞。
+
 ## 故障分级
 
 | 现象 | error_type | 处置 |
