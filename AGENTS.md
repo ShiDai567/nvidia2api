@@ -40,3 +40,13 @@ npm run build && npm run lint          # 提交前验证
 
 - 测试覆盖竞速、限流、代理限制、并发安全（SQLite 原子更新）——修改这些逻辑必须跑全套 `python -m pytest tests` 并更新对应测试。
 - 竞速判定是"首个**有效 AI 响应**"（HTTP 200 + 有 choices/message 且无 error），不是"最快连接"；流式同理取首个有效 chunk。改 `race_engine.py` 时保持该语义。
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in this repo's GitLab Issues; use `glab`. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context domain docs live at the repo root and in `docs/adr/`. See `docs/agents/domain.md`.

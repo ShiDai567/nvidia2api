@@ -2,6 +2,7 @@
 
 | 文档 | 内容 |
 |---|---|
+| [fsr.md](fsr.md) | 对照 PRD 的可行性分析、风险、实施阶段与上线门槛 |
 | [architecture.md](architecture.md) | 总体架构、技术栈、请求链路 |
 | [database.md](database.md) | SQLite 表结构、字段、索引与并发策略 |
 | [backend.md](backend.md) | 后端模块划分与 Service 层职责 |
