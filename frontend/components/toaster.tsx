@@ -15,9 +15,7 @@ let idSeq = 0;
 
 function emit(type: ToastType, message: string) {
   if (typeof window !== "undefined") {
-    window.dispatchEvent(
-      new CustomEvent("nvidia2api:toast", { detail: { type, message } })
-    );
+    window.dispatchEvent(new CustomEvent("nvidia2api:toast", { detail: { type, message } }));
   }
 }
 

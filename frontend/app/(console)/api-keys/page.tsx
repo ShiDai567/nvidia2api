@@ -106,9 +106,7 @@ export default function ApiKeysPage() {
     e.preventDefault();
     if (!editItem) return;
     try {
-      const allowed = editItem._allModels
-        ? []
-        : (editItem.allowed_models ?? []);
+      const allowed = editItem._allModels ? [] : (editItem.allowed_models ?? []);
       await api.patch(`/api/admin/api-keys/${editItem.id}`, {
         name: editItem.name,
         rate_limit: editItem.rate_limit,
@@ -179,8 +177,13 @@ export default function ApiKeysPage() {
               <Badge status={k.enabled ? "enabled" : "disabled"} />
             </Td>
             <Td className="text-gray-400">{k.rate_limit > 0 ? `${k.rate_limit}/分钟` : "不限"}</Td>
-            <Td className="max-w-[180px] truncate text-xs text-gray-400" title={(k.allowed_models ?? []).join(", ")}>
-              {!k.allowed_models || k.allowed_models.length === 0 ? "全部模型" : `${k.allowed_models.length} 个`}
+            <Td
+              className="max-w-[180px] truncate text-xs text-gray-400"
+              title={(k.allowed_models ?? []).join(", ")}
+            >
+              {!k.allowed_models || k.allowed_models.length === 0
+                ? "全部模型"
+                : `${k.allowed_models.length} 个`}
             </Td>
             <Td>{k.total_requests}</Td>
             <Td>
@@ -232,9 +235,7 @@ export default function ApiKeysPage() {
               type="number"
               min={0}
               value={create?.rate_limit ?? 0}
-              onChange={(e) =>
-                setCreate((p) => p && { ...p, rate_limit: Number(e.target.value) })
-              }
+              onChange={(e) => setCreate((p) => p && { ...p, rate_limit: Number(e.target.value) })}
             />
           </Field>
           <div className="flex justify-end gap-2 pt-2">
@@ -281,28 +282,30 @@ export default function ApiKeysPage() {
             </label>
             {!editItem?._allModels && (
               <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-white/10 p-2">
-                {models.filter((m) => m.enabled).map((m) => {
-                  const checked = (editItem?.allowed_models ?? []).includes(m.model_name);
-                  return (
-                    <label key={m.id} className="flex items-center gap-2 text-xs text-gray-300">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(e) =>
-                          setEditItem((p) => {
-                            if (!p) return p;
-                            const cur = new Set(p.allowed_models ?? []);
-                            if (e.target.checked) cur.add(m.model_name);
-                            else cur.delete(m.model_name);
-                            return { ...p, allowed_models: [...cur] };
-                          })
-                        }
-                        className="accent-[var(--accent,#76B900)]"
-                      />
-                      <span className="font-mono">{m.model_name}</span>
-                    </label>
-                  );
-                })}
+                {models
+                  .filter((m) => m.enabled)
+                  .map((m) => {
+                    const checked = (editItem?.allowed_models ?? []).includes(m.model_name);
+                    return (
+                      <label key={m.id} className="flex items-center gap-2 text-xs text-gray-300">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) =>
+                            setEditItem((p) => {
+                              if (!p) return p;
+                              const cur = new Set(p.allowed_models ?? []);
+                              if (e.target.checked) cur.add(m.model_name);
+                              else cur.delete(m.model_name);
+                              return { ...p, allowed_models: [...cur] };
+                            })
+                          }
+                          className="accent-[var(--accent,#76B900)]"
+                        />
+                        <span className="font-mono">{m.model_name}</span>
+                      </label>
+                    );
+                  })}
                 {models.filter((m) => m.enabled).length === 0 && (
                   <p className="text-xs text-gray-600">暂无已启用模型</p>
                 )}
@@ -321,9 +324,7 @@ export default function ApiKeysPage() {
       </Modal>
 
       <Modal open={!!createdKey} title="API Key 创建成功" onClose={() => setCreatedKey(null)}>
-        <p className="mb-3 text-sm text-amber-400">
-          完整 Key 只会显示这一次，请立即复制保存：
-        </p>
+        <p className="mb-3 text-sm text-amber-400">完整 Key 只会显示这一次，请立即复制保存：</p>
         <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/40 p-3">
           <code className="flex-1 break-all font-mono text-sm text-accent">{createdKey}</code>
           <button

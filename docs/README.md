@@ -2,6 +2,8 @@
 
 | 文档 | 内容 |
 |---|---|
+| [srs.md](srs.md) | 软件需求规格说明书、需求追踪与验收基线 |
+| [hld.md](hld.md) | 概要设计：系统架构、模块、数据、接口、安全与部署 |
 | [fsr.md](fsr.md) | 对照 PRD 的可行性分析、风险、实施阶段与上线门槛 |
 | [architecture.md](architecture.md) | 总体架构、技术栈、请求链路 |
 | [database.md](database.md) | SQLite 表结构、字段、索引与并发策略 |

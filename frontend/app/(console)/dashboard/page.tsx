@@ -38,13 +38,7 @@ function StatCard({
   );
 }
 
-function StatusBreakdown({
-  title,
-  data,
-}: {
-  title: string;
-  data?: Record<string, number>;
-}) {
+function StatusBreakdown({ title, data }: { title: string; data?: Record<string, number> }) {
   const entries = Object.entries(data || {});
   return (
     <Card>
@@ -119,7 +113,11 @@ export default function DashboardPage() {
         <StatCard
           icon={Globe2}
           label="已启用代理"
-          value={stats ? `${stats.enabled_proxies} / ${stats.max_enabled_proxies ?? stats.max_proxies ?? 0}` : "—"}
+          value={
+            stats
+              ? `${stats.enabled_proxies} / ${stats.max_enabled_proxies ?? stats.max_proxies ?? 0}`
+              : "—"
+          }
           sub={`共 ${stats?.proxies ?? 0} 个代理`}
         />
         <StatCard
@@ -147,7 +145,9 @@ export default function DashboardPage() {
         <StatCard
           icon={Timer}
           label="平均延迟"
-          value={stats ? `${Number(stats.avg_latency_s ?? stats.avg_latency ?? 0).toFixed(2)}s` : "—"}
+          value={
+            stats ? `${Number(stats.avg_latency_s ?? stats.avg_latency ?? 0).toFixed(2)}s` : "—"
+          }
         />
         <StatCard
           icon={Coins}
@@ -207,12 +207,18 @@ function TokenUsageChart({ days }: { days: TokenUsageDay[] }) {
       )}
       <div className="mt-2 flex justify-between text-[11px] text-gray-600">
         {days.map((d) => (
-          <span key={d.date} className="flex-1 text-center">{d.date.slice(5)}</span>
+          <span key={d.date} className="flex-1 text-center">
+            {d.date.slice(5)}
+          </span>
         ))}
       </div>
       <div className="mt-3 flex items-center gap-4 text-[11px] text-gray-500">
-        <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm bg-accent/80" /> 输入 tokens</span>
-        <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm bg-sky-400/80" /> 输出 tokens</span>
+        <span className="flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-sm bg-accent/80" /> 输入 tokens
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-sm bg-sky-400/80" /> 输出 tokens
+        </span>
         <span className="ml-auto">峰值 {fmtNum(max)}</span>
       </div>
     </Card>

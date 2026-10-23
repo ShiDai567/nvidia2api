@@ -47,14 +47,15 @@ export default function ModelsPage() {
     (m) =>
       !q ||
       m.model_name.toLowerCase().includes(q.toLowerCase()) ||
-      (m.display_name || "").toLowerCase().includes(q.toLowerCase())
+      (m.display_name || "").toLowerCase().includes(q.toLowerCase()),
   );
 
   async function sync() {
     setSyncing(true);
     try {
       const res = await api.post<{ created?: number; existing?: number; retired?: number }>(
-        "/api/admin/models/sync", {},
+        "/api/admin/models/sync",
+        {},
       );
       const parts = [`新增 ${res.created ?? 0}`, `已存在 ${res.existing ?? 0}`];
       if (res.retired) parts.push(`已下架 ${res.retired}`);

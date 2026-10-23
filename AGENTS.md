@@ -21,7 +21,10 @@ python manage.py runserver 0.0.0.0:8000
 
 # 前端（在 frontend/ 下）
 npm install && npm run dev             # :3000
-npm run build && npm run lint          # 提交前验证
+npm run build && npm run format:check && npm run lint && npm test
+npm run deps:check                     # 模块依赖循环/解析检查
+npm run deps:graph                     # 输出 DOT 依赖图
+npm run test:mutation                  # 独立运行，手动或夜间，不属于快速测试循环
 ```
 
 ## 关键事实（容易踩坑）

@@ -29,7 +29,9 @@ export default function ProxiesPage() {
   const [error, setError] = useState("");
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
-  const [editItem, setEditItem] = useState<(Partial<Proxy> & { _clearPassword?: boolean }) | null>(null);
+  const [editItem, setEditItem] = useState<(Partial<Proxy> & { _clearPassword?: boolean }) | null>(
+    null,
+  );
   const [busyId, setBusyId] = useState<number | null>(null);
   const [checkingAll, setCheckingAll] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -127,10 +129,12 @@ export default function ProxiesPage() {
   async function checkAll() {
     setCheckingAll(true);
     try {
-      const res = await api.post<{ total?: number; ok?: number; failed?: number; rate_limited?: number }>(
-        "/api/admin/proxies/check-all",
-        {},
-      );
+      const res = await api.post<{
+        total?: number;
+        ok?: number;
+        failed?: number;
+        rate_limited?: number;
+      }>("/api/admin/proxies/check-all", {});
       const total = res.total ?? 0;
       const ok = res.ok ?? 0;
       const rl = res.rate_limited ?? 0;
@@ -165,7 +169,9 @@ export default function ProxiesPage() {
       const res = await api.post<Record<string, number>>("/api/admin/proxies/import", {
         text: importText,
       });
-      toast.success(`导入完成：成功 ${res.success ?? 0}，重复 ${res.duplicate ?? 0}，无效 ${res.invalid ?? 0}`);
+      toast.success(
+        `导入完成：成功 ${res.success ?? 0}，重复 ${res.duplicate ?? 0}，无效 ${res.invalid ?? 0}`,
+      );
       setImportOpen(false);
       setImportText("");
       load();
@@ -214,10 +220,7 @@ export default function ProxiesPage() {
               <Activity size={14} /> 一键检测
             </Button>
 
-            <Button
-              variant="primary"
-              onClick={() => setEditItem({ protocol: "socks5", port: 0 })}
-            >
+            <Button variant="primary" onClick={() => setEditItem({ protocol: "socks5", port: 0 })}>
               <Plus size={14} /> 添加代理
             </Button>
             <Button onClick={load} loading={loading}>
@@ -233,7 +236,9 @@ export default function ProxiesPage() {
         </span>
         <span className="text-gray-400">
           启用代理：
-          <b className={enabledCount > maxProxies ? "text-red-400" : "text-accent"}>{enabledCount}</b>
+          <b className={enabledCount > maxProxies ? "text-red-400" : "text-accent"}>
+            {enabledCount}
+          </b>
           <span className="text-gray-600"> / {maxProxies}（最多）</span>
         </span>
         <span className="text-gray-400">直连线路：1</span>
@@ -242,7 +247,8 @@ export default function ProxiesPage() {
         </span>
         {enabledCount > maxProxies && (
           <span className="text-xs text-red-400">
-            已超出上限（Key 可能被删除过），多余代理不会被调度，请禁用 {enabledCount - maxProxies} 个
+            已超出上限（Key 可能被删除过），多余代理不会被调度，请禁用 {enabledCount - maxProxies}{" "}
+            个
           </span>
         )}
         {enabledCount === maxProxies && maxProxies > 0 && (
@@ -253,11 +259,21 @@ export default function ProxiesPage() {
       {selected.size > 0 && (
         <div className="glass mb-4 flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm">
           <span className="text-gray-400">已选 {selected.size} 项：</span>
-          <Button variant="ghost" onClick={() => bulk("enable")}>批量启用</Button>
-          <Button variant="ghost" onClick={() => bulk("disable")}>批量禁用</Button>
-          <Button variant="ghost" onClick={() => bulk("check")}>批量测速</Button>
-          <Button variant="danger" onClick={() => bulk("delete")}>批量删除</Button>
-          <Button variant="ghost" onClick={() => setSelected(new Set())}>取消选择</Button>
+          <Button variant="ghost" onClick={() => bulk("enable")}>
+            批量启用
+          </Button>
+          <Button variant="ghost" onClick={() => bulk("disable")}>
+            批量禁用
+          </Button>
+          <Button variant="ghost" onClick={() => bulk("check")}>
+            批量测速
+          </Button>
+          <Button variant="danger" onClick={() => bulk("delete")}>
+            批量删除
+          </Button>
+          <Button variant="ghost" onClick={() => setSelected(new Set())}>
+            取消选择
+          </Button>
         </div>
       )}
 
@@ -436,7 +452,11 @@ export default function ProxiesPage() {
                     type="checkbox"
                     checked={editItem?._clearPassword === true}
                     onChange={(e) =>
-                      setEditItem((p) => p && ({ ...p, _clearPassword: e.target.checked, password: "" } as typeof p))
+                      setEditItem(
+                        (p) =>
+                          p &&
+                          ({ ...p, _clearPassword: e.target.checked, password: "" } as typeof p),
+                      )
                     }
                     className="accent-[var(--accent,#76B900)]"
                   />

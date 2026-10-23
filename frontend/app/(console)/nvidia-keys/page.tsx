@@ -78,7 +78,9 @@ export default function NvidiaKeysPage() {
         action,
         ids,
       });
-      toast.success(`已${action === "enable" ? "启用" : "禁用"} ${res.updated ?? ids.length} 个 Key`);
+      toast.success(
+        `已${action === "enable" ? "启用" : "禁用"} ${res.updated ?? ids.length} 个 Key`,
+      );
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "操作失败");
@@ -189,9 +191,15 @@ export default function NvidiaKeysPage() {
       {selected.size > 0 && (
         <div className="glass mb-4 flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm">
           <span className="text-gray-400">已选 {selected.size} 项：</span>
-          <Button variant="ghost" onClick={() => bulk("enable")}>批量启用</Button>
-          <Button variant="ghost" onClick={() => bulk("disable")}>批量禁用</Button>
-          <Button variant="ghost" onClick={() => setSelected(new Set())}>取消选择</Button>
+          <Button variant="ghost" onClick={() => bulk("enable")}>
+            批量启用
+          </Button>
+          <Button variant="ghost" onClick={() => bulk("disable")}>
+            批量禁用
+          </Button>
+          <Button variant="ghost" onClick={() => setSelected(new Set())}>
+            取消选择
+          </Button>
         </div>
       )}
 
@@ -320,14 +328,22 @@ export default function NvidiaKeysPage() {
                 </div>
               ))}
             </div>
-            <Button variant="primary" onClick={() => { setImportOpen(false); setImportResult(null); setImportText(""); }}>
+            <Button
+              variant="primary"
+              onClick={() => {
+                setImportOpen(false);
+                setImportResult(null);
+                setImportText("");
+              }}
+            >
               完成
             </Button>
           </div>
         ) : (
           <>
             <p className="mb-3 text-xs leading-relaxed text-gray-500">
-              每行一条，支持 <code className="text-gray-300">名称---nvapi-xxx</code> 或仅 <code className="text-gray-300">nvapi-xxx</code>
+              每行一条，支持 <code className="text-gray-300">名称---nvapi-xxx</code> 或仅{" "}
+              <code className="text-gray-300">nvapi-xxx</code>
             </p>
             <Textarea
               rows={10}
@@ -373,9 +389,7 @@ export default function NvidiaKeysPage() {
               type="number"
               min={1}
               value={editItem?.rpm_limit ?? 40}
-              onChange={(e) =>
-                setEditItem((p) => ({ ...p, rpm_limit: Number(e.target.value) }))
-              }
+              onChange={(e) => setEditItem((p) => ({ ...p, rpm_limit: Number(e.target.value) }))}
             />
           </Field>
           <div className="flex justify-end gap-2 pt-2">

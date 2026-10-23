@@ -68,7 +68,7 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
                   "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
                   active
                     ? "bg-accent/10 text-accent"
-                    : "text-gray-400 hover:bg-white/5 hover:text-gray-200"
+                    : "text-gray-400 hover:bg-white/5 hover:text-gray-200",
                 )}
               >
                 <Icon size={16} />

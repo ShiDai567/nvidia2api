@@ -7,5 +7,7 @@ node_modules/
 .next/
 out/
 dist/
+frontend/reports/
+frontend/.stryker-tmp/
 tsconfig.tsbuildinfo
 .DS_Store

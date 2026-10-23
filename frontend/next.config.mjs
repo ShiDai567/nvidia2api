@@ -17,8 +17,7 @@ function resolveAllowedDevOrigins() {
   }
 
   // 自动识别 Coder/code-server 的代理域名模板，如 https://code-{{port}}.elsworld.cn:7100/
-  const proxyTemplate =
-    process.env.VSCODE_PROXY_URI || process.env.CODE_PROXY_URI;
+  const proxyTemplate = process.env.VSCODE_PROXY_URI || process.env.CODE_PROXY_URI;
   if (proxyTemplate) {
     try {
       const url = new URL(proxyTemplate.replace("{{port}}", process.env.PORT || "3000"));

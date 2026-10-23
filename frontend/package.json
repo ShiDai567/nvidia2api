@@ -6,7 +6,14 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "oxlint .",
+    "format": "oxfmt --write '**/*.{js,jsx,ts,tsx,mjs,cjs,json,css}'",
+    "format:check": "oxfmt --check '**/*.{js,jsx,ts,tsx,mjs,cjs,json,css}'",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:mutation": "stryker run",
+    "deps:check": "depcruise --config .dependency-cruiser.cjs --output-type err-long app components lib",
+    "deps:graph": "depcruise --config .dependency-cruiser.cjs --output-type dot app components lib"
   },
   "dependencies": {
     "lucide-react": "^0.454.0",
@@ -17,12 +24,19 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "^10.0.0",
+    "@stryker-mutator/typescript-checker": "^10.0.0",
+    "@stryker-mutator/vitest-runner": "^10.0.0",
     "@types/node": "^20.14.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "autoprefixer": "^10.4.20",
+    "dependency-cruiser": "^18.7.0",
+    "oxfmt": "^0.74.0",
+    "oxlint": "^1.89.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.14",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^3.2.7"
   }
 }

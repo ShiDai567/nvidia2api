@@ -60,6 +60,30 @@ npm install
 npm run dev   # http://localhost:3000
 ```
 
+## 代码质量与测试
+
+Oxc 负责前端格式化和静态检查，Vitest 运行快速单元测试：
+
+```bash
+npm run format          # Oxfmt 格式化
+npm run format:check    # 检查格式，不修改文件
+npm run lint            # Oxlint
+npm test                # Vitest 单元测试
+```
+
+StrykerJS 变异测试独立于快速测试循环，仅在需要时手动执行，或由每日定时任务执行：
+
+```bash
+npm run test:mutation
+```
+
+dependency-cruiser 检查 `app/`、`components/`、`lib/` 的模块依赖；命令行可检查违规或输出 Graphviz DOT 图：
+
+```bash
+npm run deps:check
+npm run deps:graph > dependencies.dot
+```
+
 后端默认 `http://127.0.0.1:8000`，跨端口走 `NEXT_PUBLIC_API_BASE_URL`。
 
 ## 远程开发（Coder / code-server 代理域名）

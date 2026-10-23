@@ -1,0 +1,5 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxfmt/configuration_schema.json",
+  "printWidth": 100,
+  "ignorePatterns": [".next/**", ".stryker-tmp/**", "node_modules/**", "coverage/**", "reports/**"]
+}

@@ -38,34 +38,43 @@ export default function RequestLogsPage() {
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  const load = useCallback(async (off = 0) => {
-    setLoading(true);
-    setError("");
-    try {
-      const params = new URLSearchParams();
-      if (model) params.set("model", model);
-      if (status) params.set("status", status);
-      if (since) {
-        // date input gives local midnight; send ISO with timezone
-        const d = new Date(`${since}T00:00:00`);
-        if (!Number.isNaN(d.getTime())) params.set("since", d.toISOString());
+  const load = useCallback(
+    async (off = 0) => {
+      setLoading(true);
+      setError("");
+      try {
+        const params = new URLSearchParams();
+        if (model) params.set("model", model);
+        if (status) params.set("status", status);
+        if (since) {
+          // date input gives local midnight; send ISO with timezone
+          const d = new Date(`${since}T00:00:00`);
+          if (!Number.isNaN(d.getTime())) params.set("since", d.toISOString());
+        }
+        params.set("limit", String(PAGE_SIZE));
+        params.set("offset", String(off));
+        const res = await api.get<LogPage>(`/api/admin/logs?${params.toString()}`);
+        const page: LogPage = Array.isArray(res)
+          ? {
+              results: res as unknown as RequestLog[],
+              total: res.length,
+              limit: PAGE_SIZE,
+              offset: 0,
+              next_offset: null,
+            }
+          : res;
+        setLogs(page.results ?? []);
+        setTotal(page.total ?? page.results?.length ?? 0);
+        setOffset(page.offset ?? 0);
+        setNextOffset(page.next_offset ?? null);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "加载失败");
+      } finally {
+        setLoading(false);
       }
-      params.set("limit", String(PAGE_SIZE));
-      params.set("offset", String(off));
-      const res = await api.get<LogPage>(`/api/admin/logs?${params.toString()}`);
-      const page: LogPage = Array.isArray(res)
-        ? { results: res as unknown as RequestLog[], total: res.length, limit: PAGE_SIZE, offset: 0, next_offset: null }
-        : res;
-      setLogs(page.results ?? []);
-      setTotal(page.total ?? page.results?.length ?? 0);
-      setOffset(page.offset ?? 0);
-      setNextOffset(page.next_offset ?? null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "加载失败");
-    } finally {
-      setLoading(false);
-    }
-  }, [model, status, since]);
+    },
+    [model, status, since],
+  );
 
   useEffect(() => {
     load(0);
@@ -120,9 +129,7 @@ export default function RequestLogsPage() {
             清除筛选
           </Button>
         )}
-        <span className="ml-auto text-xs text-gray-500">
-          共 {total.toLocaleString()} 条
-        </span>
+        <span className="ml-auto text-xs text-gray-500">共 {total.toLocaleString()} 条</span>
       </div>
 
       {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
@@ -158,13 +165,20 @@ export default function RequestLogsPage() {
                 </Td>
                 <Td className="font-mono text-xs text-gray-400">{l.request_id}</Td>
                 <Td className="text-xs text-gray-500">{fmtTime(l.created_at)}</Td>
-                <Td className="max-w-[220px] truncate font-mono text-xs text-gray-300" title={l.model}>
+                <Td
+                  className="max-w-[220px] truncate font-mono text-xs text-gray-300"
+                  title={l.model}
+                >
                   {l.model}
                 </Td>
                 <Td>{fmtLatency(l.duration_ms)}</Td>
                 <Td>{l.first_token_ms != null ? fmtLatency(l.first_token_ms) : "—"}</Td>
                 <Td className="text-xs text-gray-400">
-                  <span className="font-mono">{l.winner_proxy_name || l.winner_key_name ? `${l.winner_proxy_name || "直连"} + ${l.winner_key_name}` : "—"}</span>
+                  <span className="font-mono">
+                    {l.winner_proxy_name || l.winner_key_name
+                      ? `${l.winner_proxy_name || "直连"} + ${l.winner_key_name}`
+                      : "—"}
+                  </span>
                 </Td>
                 <Td className="text-xs text-gray-500">{l.is_stream ? "是" : "否"}</Td>
                 <Td>

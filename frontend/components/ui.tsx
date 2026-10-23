@@ -27,13 +27,7 @@ export function cx(...parts: Array<string | false | null | undefined>) {
 }
 
 /* ---------- Card ---------- */
-export function Card({
-  className,
-  children,
-}: {
-  className?: string;
-  children: React.ReactNode;
-}) {
+export function Card({ className, children }: { className?: string; children: React.ReactNode }) {
   return <div className={cx("glass p-5 shadow-glass", className)}>{children}</div>;
 }
 
@@ -52,21 +46,17 @@ export function Button({
   loading?: boolean;
 }) {
   const styles: Record<ButtonVariant, string> = {
-    primary:
-      "bg-accent/90 hover:bg-accent text-black font-medium border border-accent/40",
-    ghost:
-      "bg-white/5 hover:bg-white/10 text-gray-200 border border-white/10",
-    danger:
-      "bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30",
-    outline:
-      "bg-transparent hover:bg-white/5 text-gray-300 border border-white/15",
+    primary: "bg-accent/90 hover:bg-accent text-black font-medium border border-accent/40",
+    ghost: "bg-white/5 hover:bg-white/10 text-gray-200 border border-white/10",
+    danger: "bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30",
+    outline: "bg-transparent hover:bg-white/5 text-gray-300 border border-white/15",
   };
   return (
     <button
       className={cx(
         "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
         styles[variant],
-        className
+        className,
       )}
       disabled={disabled || loading}
       {...rest}
@@ -116,7 +106,7 @@ export function Badge({ status, label }: { status: string; label?: string }) {
     <span
       className={cx(
         "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs",
-        badgeColors[status] || badgeColors.unknown_status
+        badgeColors[status] || badgeColors.unknown_status,
       )}
     >
       <span className="h-1.5 w-1.5 rounded-full bg-current" />
@@ -146,18 +136,12 @@ export function Modal({
       onClick={onClose}
     >
       <div
-        className={cx(
-          "glass w-full shadow-glass p-6",
-          wide ? "max-w-2xl" : "max-w-md"
-        )}
+        className={cx("glass w-full shadow-glass p-6", wide ? "max-w-2xl" : "max-w-md")}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-base font-semibold text-gray-100">{title}</h3>
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-200 transition-colors"
-          >
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-200 transition-colors">
             <X size={18} />
           </button>
         </div>
@@ -183,7 +167,7 @@ export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
       {...props}
       className={cx(
         "w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-accent/50 focus:ring-1 focus:ring-accent/30",
-        props.className
+        props.className,
       )}
     />
   );
@@ -195,7 +179,7 @@ export function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement
       {...props}
       className={cx(
         "w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm font-mono text-gray-100 outline-none placeholder:text-gray-600 focus:border-accent/50 focus:ring-1 focus:ring-accent/30",
-        props.className
+        props.className,
       )}
     />
   );
@@ -207,7 +191,7 @@ export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
       {...props}
       className={cx(
         "w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-gray-100 outline-none focus:border-accent/50 [&>option]:bg-[#141419]",
-        props.className
+        props.className,
       )}
     />
   );
@@ -219,7 +203,7 @@ export function Th({ children, className }: { children?: React.ReactNode; classN
     <th
       className={cx(
         "px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wider text-gray-500",
-        className
+        className,
       )}
     >
       {children}
@@ -239,7 +223,11 @@ export function Td({
   colSpan?: number;
 }) {
   return (
-    <td colSpan={colSpan} title={title} className={cx("px-3 py-2.5 text-sm text-gray-300", className)}>
+    <td
+      colSpan={colSpan}
+      title={title}
+      className={cx("px-3 py-2.5 text-sm text-gray-300", className)}
+    >
       {children}
     </td>
   );
@@ -301,13 +289,13 @@ export function Toggle({
       onClick={() => onChange(!checked)}
       className={cx(
         "relative h-5 w-9 rounded-full transition-colors disabled:opacity-40",
-        checked ? "bg-accent" : "bg-white/15"
+        checked ? "bg-accent" : "bg-white/15",
       )}
     >
       <span
         className={cx(
           "absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all",
-          checked ? "left-[18px]" : "left-0.5"
+          checked ? "left-[18px]" : "left-0.5",
         )}
       />
     </button>

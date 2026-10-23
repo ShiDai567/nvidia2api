@@ -1,7 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bot, Brain, ChevronDown, ChevronRight, CornerDownLeft, Loader2, Trash2 } from "lucide-react";
+import {
+  Bot,
+  Brain,
+  ChevronDown,
+  ChevronRight,
+  CornerDownLeft,
+  Loader2,
+  Trash2,
+} from "lucide-react";
 import { AdminChatResponse, API_BASE_URL, api, asList, getToken, Model } from "@/lib/api";
 import { Button, Card, PageHeader, Select } from "@/components/ui";
 import { Markdown } from "@/components/markdown";
@@ -40,9 +48,7 @@ function loadStoredMessages(): ChatMessage[] {
     if (Array.isArray(parsed)) {
       return parsed.filter(
         (m): m is ChatMessage =>
-          m &&
-          typeof m.content === "string" &&
-          (m.role === "user" || m.role === "assistant"),
+          m && typeof m.content === "string" && (m.role === "user" || m.role === "assistant"),
       );
     }
   } catch {
@@ -77,7 +83,8 @@ export default function ChatPage() {
   useEffect(() => {
     if (!restored) return;
     try {
-      if (messages.length) localStorage.setItem(MESSAGES_KEY, JSON.stringify(messages.slice(-MAX_STORED_MESSAGES)));
+      if (messages.length)
+        localStorage.setItem(MESSAGES_KEY, JSON.stringify(messages.slice(-MAX_STORED_MESSAGES)));
       else localStorage.removeItem(MESSAGES_KEY);
     } catch {
       // storage full / unavailable — ignore
@@ -146,7 +153,9 @@ export default function ChatPage() {
           model,
           stream: true,
           // cap upstream context: only send the most recent turns
-          messages: history.slice(-MAX_CONTEXT_MESSAGES).map((m) => ({ role: m.role, content: m.content })),
+          messages: history
+            .slice(-MAX_CONTEXT_MESSAGES)
+            .map((m) => ({ role: m.role, content: m.content })),
         }),
       });
       if (!res.ok || !res.body) {
@@ -214,29 +223,29 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-[calc(100vh-7rem)] flex-col">
-      <PageHeader title="对话" subtitle="通过竞速引擎直接测试已启用的模型" actions={
-        <>
-          <Select
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            className="w-64 !bg-white/[0.03]"
-          >
-            <option value="">选择模型…</option>
-            {models.map((m) => (
-              <option key={m.id} value={m.model_name}>
-                {m.display_name || m.model_name}
-              </option>
-            ))}
-          </Select>
-          <Button
-            onClick={() => setMessages([])}
-            disabled={!messages.length}
-            variant="ghost"
-          >
-            <Trash2 size={14} /> 清空
-          </Button>
-        </>
-      } />
+      <PageHeader
+        title="对话"
+        subtitle="通过竞速引擎直接测试已启用的模型"
+        actions={
+          <>
+            <Select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="w-64 !bg-white/[0.03]"
+            >
+              <option value="">选择模型…</option>
+              {models.map((m) => (
+                <option key={m.id} value={m.model_name}>
+                  {m.display_name || m.model_name}
+                </option>
+              ))}
+            </Select>
+            <Button onClick={() => setMessages([])} disabled={!messages.length} variant="ghost">
+              <Trash2 size={14} /> 清空
+            </Button>
+          </>
+        }
+      />
 
       <Card className="flex-1 overflow-y-auto p-4">
         {messages.length === 0 ? (
@@ -247,7 +256,10 @@ export default function ChatPage() {
         ) : (
           <div className="space-y-4">
             {messages.map((m, i) => (
-              <div key={i} className={m.role === "user" ? "flex justify-end" : "flex justify-start"}>
+              <div
+                key={i}
+                className={m.role === "user" ? "flex justify-end" : "flex justify-start"}
+              >
                 <div
                   className={
                     m.role === "user"
@@ -256,22 +268,32 @@ export default function ChatPage() {
                   }
                 >
                   {m.reasoning && <ReasoningBlock text={m.reasoning} />}
-                  {m.role === "user"
-                    ? <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
-                    : m.content
-                      ? <Markdown>{m.content}</Markdown>
-                      : <p className="text-gray-600">&nbsp;</p>}
+                  {m.role === "user" ? (
+                    <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
+                  ) : m.content ? (
+                    <Markdown>{m.content}</Markdown>
+                  ) : (
+                    <p className="text-gray-600">&nbsp;</p>
+                  )}
                   {m.meta && (
                     <div className="mt-2 border-t border-white/10 pt-2 text-[11px] text-gray-500">
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                        <span>首字 {Math.round(m.meta.first_token_ms ?? m.meta.first_chunk_ms ?? 0)}ms</span>
-                        <span>总耗时 {Math.round(m.meta.duration_ms ?? m.meta.first_chunk_ms ?? 0)}ms</span>
-                        <span>线路: {m.meta.route_type === "direct" ? "直连" : m.meta.proxy_name}</span>
+                        <span>
+                          首字 {Math.round(m.meta.first_token_ms ?? m.meta.first_chunk_ms ?? 0)}ms
+                        </span>
+                        <span>
+                          总耗时 {Math.round(m.meta.duration_ms ?? m.meta.first_chunk_ms ?? 0)}ms
+                        </span>
+                        <span>
+                          线路: {m.meta.route_type === "direct" ? "直连" : m.meta.proxy_name}
+                        </span>
                         <span>Key: {m.meta.key_name}</span>
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-gray-500">
                         <span>输入 {m.meta.prompt_tokens ?? m.meta.usage?.prompt_tokens ?? 0}</span>
-                        <span>输出 {m.meta.completion_tokens ?? m.meta.usage?.completion_tokens ?? 0}</span>
+                        <span>
+                          输出 {m.meta.completion_tokens ?? m.meta.usage?.completion_tokens ?? 0}
+                        </span>
                         <span>缓存 {m.meta.cached_tokens ?? 0}</span>
                         <span>合计 {m.meta.total_tokens ?? m.meta.usage?.total_tokens ?? 0}</span>
                       </div>
@@ -343,7 +365,6 @@ export default function ChatPage() {
     </div>
   );
 }
-
 
 function ReasoningBlock({ text }: { text: string }) {
   const [open, setOpen] = useState(false);

@@ -38,10 +38,7 @@ function extractErrorMessage(data: unknown, status: number): string {
   return `请求失败 (HTTP ${status})`;
 }
 
-export async function request<T = unknown>(
-  path: string,
-  options: RequestInit = {}
-): Promise<T> {
+export async function request<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -88,7 +85,10 @@ export function asList<T = Record<string, unknown>>(data: unknown): T[] {
 export const api = {
   get: <T = unknown>(path: string) => request<T>(path, { method: "GET" }),
   post: <T = unknown>(path: string, body?: unknown) =>
-    request<T>(path, { method: "POST", body: body !== undefined ? JSON.stringify(body) : undefined }),
+    request<T>(path, {
+      method: "POST",
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    }),
   patch: <T = unknown>(path: string, body: unknown) =>
     request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
   del: <T = unknown>(path: string) => request<T>(path, { method: "DELETE" }),
