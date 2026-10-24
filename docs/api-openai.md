@@ -51,6 +51,7 @@
 | EC-07 | 429 | `rate_limit_exceeded` / `server_overloaded` | 带 `Retry-After` 头 |
 | EC-08 | 502 | `upstream_error` | 所有线路均失败 |
 | EC-09 | 503 | `no_available_route` | 没有可用 NVIDIA Key/线路 |
+| EC-10 | 待 API 契约裁定 | 待 API 契约裁定 | SRS-F-020 要求覆盖内部错误并返回 OpenAI 风格错误对象；状态映射、`error.code`、消息脱敏规则及运行时行为待确认/验证 |
 
 注：参数校验失败（400/403/404/413）不计入用户 Key 的配额。
 
