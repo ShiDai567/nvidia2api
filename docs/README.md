@@ -13,3 +13,4 @@
 | [api-openai.md](api-openai.md) | OpenAI 兼容 API（/v1）与错误格式 |
 | [frontend.md](frontend.md) | 前端页面结构、组件、状态与数据流 |
 | [deployment.md](deployment.md) | 环境变量、本地开发与 Docker 部署 |
+| [validation/first-release-validation-profile.md](validation/first-release-validation-profile.md) | 首发验证画像、环境/负载目标、证据规则与交接阻塞 |
