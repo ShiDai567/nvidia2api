@@ -40,16 +40,17 @@
 {"error": {"message": "…", "type": "api_error", "param": null, "code": "invalid_request"}}
 ```
 
-| HTTP | code | 备注 |
-|---|---|---|
-| 400 | `invalid_request` | |
-| 401 | `invalid_api_key` | |
-| 403 | `key_disabled` / `model_not_allowed` | Key 被禁用 / Key 的 allowed_models 不含该模型 |
-| 404 | `model_not_found` | 模型不存在或未在控制台启用 |
-| 413 | `payload_too_large` | 请求体 > 4MB |
-| 429 | `rate_limit_exceeded` / `server_overloaded` | 带 `Retry-After` 头 |
-| 502 | `upstream_error` | 所有线路均失败 |
-| 503 | `no_available_route` | 没有可用 NVIDIA Key/线路 |
+| 用例 ID | HTTP | code | 备注 |
+|---|---|---|---|
+| EC-01 | 401 | `invalid_api_key` | 无效用户 API Key |
+| EC-02 | 403 | `key_disabled` | 用户 API Key 被禁用 |
+| EC-03 | 403 | `model_not_allowed` | Key 的 allowed_models 不含该模型 |
+| EC-04 | 404 | `model_not_found` | 模型不存在或未在控制台启用 |
+| EC-05 | 400 | `invalid_request` | |
+| EC-06 | 413 | `payload_too_large` | 请求体 > 4MB |
+| EC-07 | 429 | `rate_limit_exceeded` / `server_overloaded` | 带 `Retry-After` 头 |
+| EC-08 | 502 | `upstream_error` | 所有线路均失败 |
+| EC-09 | 503 | `no_available_route` | 没有可用 NVIDIA Key/线路 |
 
 注：参数校验失败（400/403/404/413）不计入用户 Key 的配额。
 
