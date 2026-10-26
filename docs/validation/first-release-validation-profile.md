@@ -53,6 +53,67 @@ SRS-F-017 要求能力矩阵覆盖下列维度，但这些能力是否纳入某�
 | `max_tokens` 等 token 上限 | 必须登记逐模型能力 | 候选或必需待运营方决定；边界及错误行为待决定 | 未验证 | SRS-F-017、TBD-03 |
 | 流式 `usage` / `stream_options.include_usage` | 必须登记逐模型能力 | 待决定；平台当前会请求流式 usage 的实现事实不是逐模型兼容证据 | 未验证 | SRS-F-017、TBD-03 |
 
+## 候选模型与客户端目录（供运营方选择，未选定）
+
+本节是代理按“查证事实、准备选项”职责整理的候选素材，用于加速运营方对 TBD-01/TBD-02 的选择，**不是已选目标、不表示能力已验证**。模型清单取自 NVIDIA 公开端点 `GET /v1/models`（无需鉴权，与 `nvidia_service.py` 的同步来源一致），抓取日期 2026-10-26，共 85 个模型；上游随时可能增删，最终以运营方批准的清单为准。
+
+### 候选对话/指令文本模型（文本基线的首选池）
+
+以下是与 `/v1/chat/completions` 常规文本、非流式、SSE 基线直接相关的候选（40 个）。运营方从中选择代表性模型并钉死版本/区域；不在此表的模型不代表不可用，也不因列入即视为已选。
+
+| 模型 id | 厂商 |
+|---|---|
+| 01-ai/yi-large | 01.AI |
+| ai21labs/jamba-1.5-large-instruct | AI21 |
+| aisingapore/sea-lion-7b-instruct | AI Singapore |
+| databricks/dbrx-instruct | Databricks |
+| deepseek-ai/deepseek-v4.1-flash | DeepSeek |
+| google/gemma-3-4b-it / gemma-3-12b-it / gemma-4-31b-it | Google |
+| ibm/granite-3.0-3b-a800m-instruct / granite-3.0-8b-instruct | IBM |
+| meta/llama2-70b | Meta |
+| microsoft/phi-3.5-moe-instruct | Microsoft |
+| minimaxai/minimax-m3.1-flash | MiniMax |
+| mistralai/mistral-7b-instruct-v0.3 / mistral-large / mistral-large-2-instruct / mixtral-8x22b-v0.1 | Mistral |
+| moonshotai/kimi-k2.6 | Moonshot |
+| nv-mistralai/mistral-nemo-12b-instruct | NVIDIA |
+| nvidia/llama-3.1-nemotron-51b-instruct / llama-3.1-nemotron-70b-instruct / llama-3.1-nemotron-ultra-253b-v1 | NVIDIA |
+| nvidia/llama3-chatqa-1.5-70b | NVIDIA |
+| nvidia/mistral-nemo-minitron-8b-8k-instruct | NVIDIA |
+| nvidia/nemotron-3.5-bolt-e4b / nemotron-3.5-lightning-30b-a3b | NVIDIA |
+| nvidia/nemotron-3-nano-omni-30b-a3b-reasoning / nemotron-3-super-120b-a12b / nemotron-3-ultra-550b-a55b | NVIDIA |
+| nvidia/nemotron-4-340b-instruct / nemotron-nano-3-30b-a3b | NVIDIA |
+| openai/gpt-oss-20b | OpenAI |
+| stepfun-ai/step-5-preview | StepFun |
+| writer/palmyra-creative-122b / palmyra-fin-70b-32k / palmyra-med-70b / palmyra-med-70b-32k | Writer |
+| z-ai/glm-5.3 / glm-5.3-flash | 智谱 |
+| zyphra/zamba2-7b-instruct | Zyphra |
+
+### 其他类别（候选能力范围，非文本基线必需）
+
+这些类别需要不同的输入/输出形态或判定口径，属于 TBD-03 逐模型能力矩阵的候选范围，不纳入常规文本基线的默认验证：
+
+| 类别 | 数量（约） | 代表示例 |
+|---|---|---|
+| 代码 / 代码补全 | 9 | meta/codellama-70b、deepseek-ai/deepseek-coder-6.7b-instruct、ibm/granite-8b-code-instruct、mistralai/codestral-22b-instruct-v0.1 |
+| 视觉 / 多模态 | 11 | meta/llama-3.2-11b-vision-instruct、microsoft/phi-3-vision-128k-instruct、nvidia/neva-22b、nvidia/vila |
+| 嵌入 / 检索 | 10 | nvidia/embed-qa-4、nvidia/nv-embedqa-mistral-7b-v2、snowflake/arctic-embed-l、nvidia/nvclip |
+| 安全 / 守护 / 奖励 | 6 | meta/llama-guard-4-12b、nvidia/llama-3.1-nemoguard-8b-content-safety、nvidia/nemotron-4-340b-reward |
+| 文档解析 | 2 | nvidia/nemotron-parse、nvidia/nemotron-parse-2.0 |
+| 翻译 | 2 | nvidia/riva-translate-4b-instruct(-v2) |
+| 其他 / 专用（基础模型、视频检测、校准等） | 5 | google/gemma-2b、nvidia/ai-synthetic-video-detector、nvidia/cosmos-reason2-8b |
+
+> 记录事实：仓库 [OpenAI API 文档](../api-openai.md) 调用示例中的 `meta/llama-3.3-70b-instruct` 不在当前公开目录内（当前只有 `meta/llama-3.2-*-vision-instruct` 与 `meta/llama2-70b`）。该示例可能已过时，是否更新示例、是否将其纳入候选需运营方决定；此处仅如实登记，不猜测其上线状态。
+
+### 候选客户端 / SDK（TBD-02）
+
+| 候选 | 说明 |
+|---|---|
+| openai-python | 仓库 API 文档调用示例即用此 SDK；OpenAI 兼容主路径 |
+| openai-node | 前端/Node 调用方常用 |
+| curl / 原始 HTTP | 契约测试基线，SSE、错误格式、`Retry-After` 头最贴近直接观察 |
+
+具体版本由运营方在 TBD-02 钉死；本表只列 SDK 类别，不代运营方指定版本号（版本选择即兼容声明范围，须经批准）。
+
 ## 预期行为与证据
 
 后续外部行为验证优先通过现有 `GET /v1/models` 和 `POST /v1/chat/completions` HTTP 入口进行，并在执行前由服务运营方确认该入口代表其预期调用路径。本画像不执行真实兼容测试。接口契约参见 [OpenAI API 文档](../api-openai.md)；上游有效响应与 SSE Winner 规则参见 SRS-F-005、006。
