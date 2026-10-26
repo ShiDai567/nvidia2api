@@ -142,6 +142,21 @@ SRS-F-017 要求能力矩阵覆盖下列维度，但这些能力是否纳入某�
 
 后续外部行为验证优先通过现有 `GET /v1/models` 和 `POST /v1/chat/completions` HTTP 入口进行，并在执行前由服务运营方确认该入口代表其预期调用路径。本画像不执行真实兼容测试。接口契约参见 [OpenAI API 文档](../api-openai.md)；上游有效响应与 SSE Winner 规则参见 SRS-F-005、006。
 
+### 现有测试先例（可复用，非真实兼容证据）
+
+后续外部行为验证优先复用仓库已有的 HTTP 入口测试先例，作为用例骨架与故障注入素材；这些先例只证明内部行为，不能单独证明真实 NVIDIA/代理兼容性。`backend/tests/test_views.py` 已覆盖：
+
+| 先例 | 具体用例 |
+|---|---|
+| 模型过滤/授权 | `test_models_list_filtered_by_allowed`、`test_forbidden_model_403`、`test_unknown_model_404_and_quota_not_burned` |
+| 非流式成功/失败 | `NonStreamingViewTests`（`test_success_returns_payload`、`test_all_failed_502`） |
+| SSE 全失败/空线路/Winner/非阻塞泵 | `StreamingStatusTests`（`test_stream_all_failed_returns_502`、`test_stream_no_routes_returns_503`、`test_stream_winner_returns_sse_200`、`test_stream_pump_uses_non_blocking_submit`） |
+| 认证/参数/错误契约 | `ChatViewValidationTests`（`test_invalid_json_401_first`、`test_missing_model_400` 等） |
+
+### 变更影响识别（SRS-F-001、005、006、017、020、021 + TBD-03）
+
+模型、客户端、环境或参数规则任一变化，都可能使既有兼容声明失效。后续变更时按下列来源回查受影响声明：模型清单变化（TBD-01）、客户端版本变化（TBD-02）、逐模型能力/参数行为变化（TBD-03）、错误契约变化（[OpenAI API 文档](../api-openai.md) 中 EC-01 至 EC-10）、有效响应与 SSE Winner 规则变化（SRS-F-005、006）。详细兼容变更策略留待后续目标，本画像只登记影响识别入口，不预先给出答案。
+
 每份证据至少登记：
 
 | 证据字段 | 要求 |
