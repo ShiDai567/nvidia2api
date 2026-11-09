@@ -2427,7 +2427,8 @@ nvidia2api/
 │   ├── services/
 │   ├── api/
 │   ├── tests/
-│   └── requirements.txt
+│   ├── pyproject.toml
+│   └── uv.lock
 │
 ├── frontend/
 │   ├── app/

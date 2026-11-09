@@ -10,8 +10,7 @@ DEBUG=false
 DATA_DIR=./data
 DATABASE_PATH=./data/db.sqlite3
 
-# 管理后台账号 / token
-ADMIN_USERNAME=admin
+# 管理后台密码 / token（管理后台只需密码登录，API 仍使用固定 Token）
 ADMIN_PASSWORD=admin123
 ADMIN_TOKEN=dev-admin-token
 
@@ -40,10 +39,12 @@ ALLOWED_DEV_ORIGINS=code-3000.elsworld.cn
 
 ## 本地开发
 
+后端需要 Python 3.12+ 和 [uv](https://docs.astral.sh/uv/)。在 `backend/` 下执行 `uv sync --dev` 会根据 `uv.lock` 创建虚拟环境并安装开发依赖。
+
 ```bash
 cd backend
-pip install -r requirements.txt
-python manage.py runserver 0.0.0.0:8000     # 启动时自动 migrate，无需手动建表
+uv sync --dev
+uv run python manage.py runserver 0.0.0.0:8000     # 启动时自动 migrate，无需手动建表
 
 cd ../frontend
 npm install
@@ -53,7 +54,7 @@ npm run dev                                  # http://localhost:3000
 测试：
 
 ```bash
-cd backend && python -m pytest tests
+cd backend && uv run pytest tests
 ```
 
 ## Docker 一体化
@@ -62,7 +63,7 @@ cd backend && python -m pytest tests
 docker compose up -d
 ```
 
-- `backend` 容器内运行 Django，SQLite 落到挂载的 `./data`
+- Docker 镜像从 `uv.lock` 安装 Django 运行依赖；容器内运行 Django，SQLite 落到挂载的 `./data`
 - `frontend` 容器 `npm install && npm run build && npm run start`
 
 仅后端 + 已有前端静态资源可用根 `Dockerfile`：前端先 build（Node 22 阶段），后端挂在 Python 3.12-slim，`DATA_DIR=/app/data`。

@@ -93,3 +93,18 @@ class FailureStatusTests(TestCase):
         self.key.refresh_from_db()
         self.assertEqual(self.key.status, NvidiaApiKeyStatus.AVAILABLE)
         self.assertIsNone(self.key.cooldown_until)
+
+    def test_missing_local_file_is_not_counted_as_key_failure(self):
+        from unittest.mock import patch
+
+        with patch(
+            "services.nvidia_service.list_models_raw",
+            side_effect=FileNotFoundError(2, "No such file or directory"),
+        ):
+            result = key_service.test_key(self.key)
+
+        self.key.refresh_from_db()
+        self.assertFalse(result["ok"])
+        self.assertIn("SSL_CERT_FILE", result["error"])
+        self.assertEqual(self.key.failure_count, 0)
+        self.assertEqual(self.key.status, NvidiaApiKeyStatus.AVAILABLE)

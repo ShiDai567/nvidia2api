@@ -201,6 +201,18 @@ def test_key(key: NvidiaApiKey) -> dict:
             return {"ok": True, "http_status": status_code}
         report_failure(key.id, "http_error", status_code)
         return {"ok": False, "http_status": status_code}
+    except FileNotFoundError as exc:
+        # A missing local certificate/proxy file is an environment issue, not a
+        # bad NVIDIA credential; do not penalize or cool down this key.
+        logger.error("key test could not access a local file (errno=%s)", exc.errno)
+        return {
+            "ok": False,
+            "error": (
+                "后端访问了不存在的本地文件，通常是 SSL_CERT_FILE/SSL_CERT_DIR "
+                "或 HTTPS_PROXY 配置的路径无效。请检查后端运行环境并重启服务；"
+                "此错误不代表 NVIDIA Key 无效。"
+            ),
+        }
     except Exception as exc:  # noqa: BLE001
         report_failure(key.id, "network_error")
         return {"ok": False, "error": str(exc)}

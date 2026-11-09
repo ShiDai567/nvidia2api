@@ -53,7 +53,9 @@ route_i ── open POST stream ──► 等第一个有效 SSE chunk
                               其余线路 cancel + 释放 httpx Client
 ```
 
-`race_stream_winner` 返回 `StreamWinner(route, cm, req_cm, ait, first_line, report)`，调用方随后将首个 chunk 与后续 `aiter_lines()` 转发出去。
+后台对话接口先返回 `StreamingHttpResponse`，并异步等待 `race_stream`；等待首个有效 chunk 期间每 5 秒发 SSE 注释心跳，避免线路连接或慢模型触发反向代理读超时。对外 `/v1` 流式接口仍在响应头发出前同步确定 Winner，以保留真实 HTTP 502/503。
+
+`race_stream_winner` 返回 `StreamWinner(route, cm, req_cm, ait, first_line, report)`，调用方随后将首个 chunk 与后续 `aiter_lines()` 转发出去。后台接口竞速失败时，由于 SSE 响应已经开始，错误通过 SSE `error` 事件传递，而不是更改 HTTP 状态码。
 
 只在第一条 `data:` 有效时才算 Winner；第一条 `data:` 无效直接判 `invalid_response`，不等完整流。
 
@@ -74,10 +76,12 @@ Winner 确认后，视图起一个"泵"协程把 `winner.lines()` 写入 `queue.
 | HTTP 429 | rate_limited | Key → `rate_limited` + 冷却 60s |
 | HTTP 404 | model_not_found | 不再尝试其他线路由用户换模型 |
 | HTTP 5xx | upstream_server_error | 冷却 60s |
+| 本地文件不存在（例如 CA bundle 路径无效） | local_file_error | 记录为部署配置问题；不惩罚 Key 或代理，检查 SSL_CERT_FILE / SSL_CERT_DIR / 代理配置 |
 | 代理 connect/timeout | connect_error / timeout / network_error | 代理计数失败；连续 3 次标记 unhealthy + 冷却 |
 | 200 但无 choices | invalid_response | 30s 冷却 |
 
 代理与 Key 的失败互不影响：单个 Key 失效不会抑制代理，反之亦然。
+所有线路失败时，502 错误摘要会附线路名与上游 HTTP 状态（若有）；详情同时保存在 `routes`，可用于区分 Key 拒绝、模型错误、限流和本地网络/证书故障。
 
 ## 取消语义
 

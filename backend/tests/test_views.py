@@ -235,7 +235,116 @@ class NonStreamingViewTests(TestCase):
         self.assertEqual(resp.status_code, 502)
 
 
+class AdminChatViewTests(TestCase):
+    def setUp(self):
+        from django.conf import settings
+
+        self.admin_token = settings.ADMIN_TOKEN
+        AIModel.objects.create(model_name="m/test", enabled=True)
+        NvidiaApiKey.objects.create(name="k1", api_key="nvapi-k1")
+
+    def test_stream_failure_is_forwarded_as_sse_error(self):
+        from django.test import Client
+        from services.race_engine import AllRoutesFailed
+
+        report = [{
+            "name": "direct:k1", "kind": "direct", "key_name": "k1",
+            "proxy_name": "", "status": "failed", "latency_ms": 12.3,
+            "error": "invalid_key", "http_status": 401,
+        }]
+        with patch("services.race_engine.race_stream", side_effect=AllRoutesFailed(
+            ["direct:k1:invalid_key (HTTP 401)"], report=report
+        )):
+            response = Client().post(
+                "/api/admin/chat",
+                data=json.dumps({
+                    "model": "m/test", "stream": True,
+                    "messages": [{"role": "user", "content": "hi"}],
+                }),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Token {self.admin_token}",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/event-stream")
+        body = b"".join(response.streaming_content).decode()
+        self.assertIn('"code": "upstream_error"', body)
+        self.assertIn("HTTP 401", body)
+        self.assertIn("data: [DONE]", body)
+
+    def test_stream_sends_heartbeat_while_upstream_is_pending(self):
+        from concurrent.futures import Future
+        from django.test import Client
+
+        future = Future()
+        def keep_pending(coro):
+            coro.close()
+            return future
+
+        with patch("services.loop.submit_coroutine", side_effect=keep_pending):
+            response = Client().post(
+                "/api/admin/chat",
+                data=json.dumps({
+                    "model": "m/test", "stream": True,
+                    "messages": [{"role": "user", "content": "hi"}],
+                }),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Token {self.admin_token}",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(next(iter(response.streaming_content)), b": keep-alive\n\n")
+
+
 class LoginSecurityTests(TestCase):
+    def test_login_requires_password_only_and_ignores_legacy_username(self):
+        from django.conf import settings
+        from django.test import Client
+        from api.auth import _LOGIN_FAILS
+
+        _LOGIN_FAILS.clear()
+        c = Client()
+        resp = c.post("/api/admin/login", {"password": settings.ADMIN_PASSWORD})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["token"], settings.ADMIN_TOKEN)
+        resp = c.post("/api/admin/login", {
+            "username": "legacy value is ignored", "password": settings.ADMIN_PASSWORD,
+        })
+        self.assertEqual(resp.status_code, 200)
+        _LOGIN_FAILS.clear()
+
+    def test_model_sync_reports_enabled_conflicts(self):
+        from django.test import Client
+        from django.conf import settings
+
+        rec = AIModel.objects.create(model_name="a/removed", enabled=True)
+        with patch("api.admin_views.nvidia_service.sync_models", return_value={
+            "created": 0, "existing": 0, "total": 0, "retired": 1,
+            "retired_models": [{"id": rec.id, "model_name": rec.model_name,
+                                "was_enabled": True}],
+            "conflicts": [{"id": rec.id, "model_name": rec.model_name,
+                           "was_enabled": True}],
+            "restored": 0, "restored_models": [],
+        }):
+            resp = Client().post(
+                "/api/admin/models/sync", data="{}", content_type="application/json",
+                HTTP_AUTHORIZATION=f"Token {settings.ADMIN_TOKEN}",
+            )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["conflicts"][0]["model_name"], "a/removed")
+
+    def test_retired_model_cannot_be_enabled(self):
+        from django.conf import settings
+        from django.test import Client
+
+        rec = AIModel.objects.create(model_name="a/removed", enabled=False, status="retired")
+        resp = Client().patch(
+            f"/api/admin/models/{rec.id}", data=json.dumps({"enabled": True}),
+            content_type="application/json", HTTP_AUTHORIZATION=f"Token {settings.ADMIN_TOKEN}",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()["error"]["code"], "model_retired")
+
     def test_login_lockout_after_failures(self):
         from django.test import Client
         from api.auth import _LOGIN_FAILS, _LOGIN_MAX_FAILS, _LOGIN_WINDOW
@@ -244,9 +353,10 @@ class LoginSecurityTests(TestCase):
         _LOGIN_FAILS.clear()
         c = Client()
         for _ in range(_LOGIN_MAX_FAILS):
-            resp = c.post("/api/admin/login", {"username": "admin", "password": "wrong"})
+            resp = c.post("/api/admin/login", {"password": "wrong"})
             self.assertEqual(resp.status_code, 401)
-        resp = c.post("/api/admin/login", {"username": "admin", "password": "admin123"})
+        from django.conf import settings
+        resp = c.post("/api/admin/login", {"password": settings.ADMIN_PASSWORD})
         self.assertEqual(resp.status_code, 429)
         _LOGIN_FAILS.clear()
 

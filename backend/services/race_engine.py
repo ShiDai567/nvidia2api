@@ -114,6 +114,10 @@ def _client_timeout() -> httpx.Timeout:
 
 
 def _classify_error(exc: Exception) -> tuple[str, int]:
+    # Invalid local CA/proxy paths are deployment configuration errors, not
+    # evidence that the NVIDIA key or proxy endpoint itself is unhealthy.
+    if isinstance(exc, FileNotFoundError):
+        return "local_file_error", 0
     if isinstance(exc, httpx.TimeoutException):
         return "timeout", 0
     if isinstance(exc, httpx.ConnectError):
@@ -135,10 +139,10 @@ async def _do_request(route: Route, body: dict, base_url: str,
         "Authorization": f"Bearer {route.key.api_key}",
         "Content-Type": "application/json",
     }
-    from services.loop import acquire_client
-    client = acquire_client(route.proxy.url if route.proxy is not None else None,
-                            _client_timeout())
     try:
+        from services.loop import acquire_client
+        client = acquire_client(route.proxy.url if route.proxy is not None else None,
+                                _client_timeout())
         resp = await client.post(
             f"{base_url}/chat/completions", json=body, headers=headers
         )
@@ -185,6 +189,13 @@ def _mark_success(route: Route):
 
 
 def _mark_failure(route: Route, error_type: str, http_status: int):
+    if error_type == "local_file_error":
+        logger.error(
+            "route %s could not access a local file; check SSL_CERT_FILE, "
+            "SSL_CERT_DIR, and proxy configuration",
+            route.name,
+        )
+        return
     report_failure(route.key.id, error_type, http_status)
     if route.proxy is not None and http_status == 0:
         report_proxy_result(route.proxy.id, False)
@@ -223,9 +234,17 @@ async def _race(routes: list[Route], body: dict, base_url: str) -> RaceResult:
                             (_time.monotonic() - t0) * 1000, "winner decided"))
                     result.report = report
                     return result
-                errors.append(f"{result.route.name}:{result.error_type}")
+                error = f"{result.route.name}:{result.error_type}"
+                if result.http_status:
+                    error += f" (HTTP {result.http_status})"
+                if result.error_type == "local_file_error":
+                    error += " (检查 SSL_CERT_FILE/SSL_CERT_DIR 或代理配置)"
+                errors.append(error)
+                route_error = result.error_type
+                if result.error_type == "local_file_error":
+                    route_error += " (检查 SSL_CERT_FILE/SSL_CERT_DIR 或代理配置)"
                 report.append(route_info(result.route, "failed", result.latency_ms,
-                                         result.error_type, result.http_status))
+                                         route_error, result.http_status))
     finally:
         for t in tasks:
             if not t.done():
@@ -243,13 +262,14 @@ async def _stream_first_valid(route: Route, body: dict, base_url: str):
         "Authorization": f"Bearer {route.key.api_key}",
         "Content-Type": "application/json",
     }
-    from services.loop import acquire_client
-    client = acquire_client(route.proxy.url if route.proxy is not None else None,
-                            _client_timeout())
-    resp_cm = client.stream(
-        "POST", f"{base_url}/chat/completions", json=body, headers=headers
-    )
+    resp_cm = None
     try:
+        from services.loop import acquire_client
+        client = acquire_client(route.proxy.url if route.proxy is not None else None,
+                                _client_timeout())
+        resp_cm = client.stream(
+            "POST", f"{base_url}/chat/completions", json=body, headers=headers
+        )
         resp = await resp_cm.__aenter__()
         if resp.status_code != 200:
             typ = _classify_status(resp.status_code, {})
@@ -277,7 +297,8 @@ async def _stream_first_valid(route: Route, body: dict, base_url: str):
         return (client, resp_cm, resp, ait, first_line), None
     except asyncio.CancelledError:
         try:
-            await resp_cm.__aexit__(None, None, None)
+            if resp_cm is not None:
+                await resp_cm.__aexit__(None, None, None)
         except Exception:  # noqa: BLE001
             pass
         raise
@@ -285,10 +306,14 @@ async def _stream_first_valid(route: Route, body: dict, base_url: str):
         typ, _ = _classify_error(exc)
         _mark_failure(route, typ, 0)
         try:
-            await resp_cm.__aexit__(None, None, None)
+            if resp_cm is not None:
+                await resp_cm.__aexit__(None, None, None)
         except Exception:  # noqa: BLE001
             pass
-        return None, route_info(route, "failed", error=typ)
+        error = typ
+        if typ == "local_file_error":
+            error += " (检查 SSL_CERT_FILE/SSL_CERT_DIR 或代理配置)"
+        return None, route_info(route, "failed", error=error)
 
 
 def race_chat(routes: list[Route], body: dict, base_url: str) -> RaceResult:
@@ -333,8 +358,13 @@ async def race_stream_winner(routes: list[Route], body: dict, base_url: str):
     finally:
         pass
     failures = [r for r in report if r.get("status") == "failed"] or report
-    raise AllRoutesFailed(
-        [f"{f['name']}:{f['error']}" for f in failures], report=report)
+    errors = []
+    for failure in failures:
+        error = f"{failure['name']}:{failure['error']}"
+        if failure.get("http_status"):
+            error += f" (HTTP {failure['http_status']})"
+        errors.append(error)
+    raise AllRoutesFailed(errors, report=report)
 
 
 async def iter_sse(first_line: str, aiter, include_first: bool = True) -> AsyncIterator[str]:

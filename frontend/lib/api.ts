@@ -147,6 +147,17 @@ export interface Model {
   updated_at: string;
 }
 
+export interface ModelSyncResult {
+  created: number;
+  existing: number;
+  total: number;
+  retired: number;
+  retired_models: { id: number; model_name: string; was_enabled: boolean }[];
+  conflicts: { id: number; model_name: string; was_enabled: boolean }[];
+  restored: number;
+  restored_models: { id: number; model_name: string }[];
+}
+
 export interface UserApiKey {
   id: number;
   name: string;

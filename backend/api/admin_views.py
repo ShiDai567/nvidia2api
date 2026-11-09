@@ -3,6 +3,7 @@ from __future__ import annotations
 import hmac
 from datetime import timedelta
 
+import httpx
 from django.conf import settings
 from django.db.models import Count, Q
 from django.utils import timezone
@@ -33,14 +34,12 @@ class LoginView(APIView):
                 {"detail": "尝试次数过多，请 5 分钟后再试"},
                 status=429, headers={"Retry-After": "300"},
             )
-        u = str(request.data.get("username", ""))
         p = str(request.data.get("password", ""))
-        u_ok = hmac.compare_digest(u.encode("utf-8"), str(settings.ADMIN_USERNAME).encode("utf-8"))
         p_ok = hmac.compare_digest(p.encode("utf-8"), str(settings.ADMIN_PASSWORD).encode("utf-8"))
-        if u_ok and p_ok:
+        if p_ok:
             return Response({"token": settings.ADMIN_TOKEN})
         note_login_failure(request)
-        return Response({"detail": "Invalid credentials"}, status=401)
+        return Response({"detail": "管理密码错误，请重试"}, status=401)
 
 
 # ---------------------------------------------------------------- nvidia keys
@@ -308,6 +307,12 @@ class ModelSyncView(AdminRequiredMixin, APIView):
                 {"error": {"message": str(exc), "code": "upstream_error"}},
                 status=502,
             )
+        except httpx.HTTPError:
+            return Response(
+                {"error": {"message": "无法连接 NVIDIA 模型服务，请稍后重试；本地模型未修改",
+                           "code": "upstream_error"}},
+                status=502,
+            )
 
 
 class ModelDetailView(AdminRequiredMixin, APIView):
@@ -321,7 +326,13 @@ class ModelDetailView(AdminRequiredMixin, APIView):
         rec = self._get(pk)
         if not rec:
             return Response({"detail": "not found"}, status=404)
-        for f in ("display_name", "description", "enabled", "status"):
+        if rec.status == "retired" and request.data.get("enabled") is True:
+            return Response(
+                {"error": {"message": "该模型已从 NVIDIA 官方列表移除，重新同步确认恢复后才能启用",
+                           "code": "model_retired"}},
+                status=400,
+            )
+        for f in ("display_name", "description", "enabled"):
             if f in request.data:
                 setattr(rec, f, request.data[f])
         rec.save()
@@ -621,12 +632,13 @@ class AdminChatView(AdminRequiredMixin, APIView):
         """
         import json
         import queue as _queue
+        import threading
         import time
 
         from django.http import StreamingHttpResponse
 
         from services.load_balancer import build_routes
-        from services.loop import run_coroutine, submit_coroutine
+        from services.loop import submit_coroutine
         from services.race_engine import AllRoutesFailed, NoRouteAvailable, race_stream
 
         routes = build_routes()
@@ -646,61 +658,86 @@ class AdminChatView(AdminRequiredMixin, APIView):
                                        "code": "no_available_route"}}, status=503)
 
         t0 = time.monotonic()
-        try:
-            winner = run_coroutine(race_stream(routes, body, settings.NVIDIA_BASE_URL))
-        except (NoRouteAvailable, AllRoutesFailed) as exc:
-            log.status, log.http_status, log.error_type = "error", 502, "all_routes_failed"
-            if isinstance(exc, AllRoutesFailed):
-                log.routes = exc.report
-            log.save()
-            resp = Response({"error": {"message": f"所有线路均失败: {exc}",
-                                       "code": "upstream_error"},
-                             "routes": exc.report if isinstance(exc, AllRoutesFailed) else []},
-                            status=502)
-            return resp
-        except Exception as exc:  # noqa: BLE001
-            log.status, log.error_type = "error", "stream_error"
-            log.save()
-            return Response({"error": {"message": f"stream error: {exc}",
-                                       "code": "stream_error"}}, status=502)
-
-        duration = round((time.monotonic() - t0) * 1000, 1)
-        log.status, log.http_status = "success", 200
-        log.duration_ms = duration
-        log.first_token_ms = duration
-        log.winner_route_type = winner.route.kind
-        log.winner_key_name = winner.route.key.name
-        log.winner_proxy_name = winner.route.proxy.name if winner.route.proxy else ""
-        log.proxy_public_ip = winner.route.proxy.public_ip if winner.route.proxy else ""
-        log.routes = winner.report or []
-        log.save()
-
+        race_future = submit_coroutine(race_stream(routes, body, settings.NVIDIA_BASE_URL))
+        race_done = threading.Event()
+        race_future.add_done_callback(lambda _future: race_done.set())
         q: _queue.Queue = _queue.Queue()
         SENTINEL = object()
 
-        async def _pump():
-            usage: dict = {}
-            try:
-                async for chunk in winner.lines():
-                    try:
-                        payload = json.loads(chunk[5:].strip()) if chunk.startswith("data:") else {}
-                        if isinstance(payload, dict) and payload.get("usage"):
-                            usage = payload["usage"]
-                    except Exception:  # noqa: BLE001
-                        pass
-                    q.put(chunk)
-            except Exception as exc:  # noqa: BLE001
-                q.put(SENTINEL)
-                q.put(exc)
-                return
-            finally:
-                await winner.close()
-            q.put(SENTINEL)
-            q.put(usage)
-
-        submit_coroutine(_pump())
-
         def gen():
+            # Keep reverse proxies alive while a route connects or a slow model
+            # prepares its first token. The frontend ignores SSE comment frames.
+            while not race_future.done():
+                yield ": keep-alive\n\n"
+                if not race_future.done():
+                    race_done.wait(5)
+
+            try:
+                winner = race_future.result()
+            except (NoRouteAvailable, AllRoutesFailed) as exc:
+                routes_report = exc.report if isinstance(exc, AllRoutesFailed) else []
+                log.status, log.http_status, log.error_type = "error", 502, "all_routes_failed"
+                log.routes = routes_report
+                log.duration_ms = round((time.monotonic() - t0) * 1000, 1)
+                log.save()
+                yield "data: " + json.dumps({
+                    "error": {
+                        "message": f"所有线路均失败: {exc}",
+                        "type": "api_error",
+                        "param": None,
+                        "code": "upstream_error",
+                    }
+                }) + "\n\n"
+                yield "data: [DONE]\n\n"
+                return
+            except Exception as exc:  # noqa: BLE001
+                log.status, log.http_status, log.error_type = "error", 502, "stream_error"
+                log.duration_ms = round((time.monotonic() - t0) * 1000, 1)
+                log.save()
+                yield "data: " + json.dumps({
+                    "error": {
+                        "message": f"stream error: {exc}",
+                        "type": "api_error",
+                        "param": None,
+                        "code": "stream_error",
+                    }
+                }) + "\n\n"
+                yield "data: [DONE]\n\n"
+                return
+
+            duration = round((time.monotonic() - t0) * 1000, 1)
+            log.status, log.http_status = "success", 200
+            log.duration_ms = duration
+            log.first_token_ms = duration
+            log.winner_route_type = winner.route.kind
+            log.winner_key_name = winner.route.key.name
+            log.winner_proxy_name = winner.route.proxy.name if winner.route.proxy else ""
+            log.proxy_public_ip = winner.route.proxy.public_ip if winner.route.proxy else ""
+            log.routes = winner.report or []
+            log.save()
+
+            async def _pump():
+                usage: dict = {}
+                try:
+                    async for chunk in winner.lines():
+                        try:
+                            payload = json.loads(chunk[5:].strip()) if chunk.startswith("data:") else {}
+                            if isinstance(payload, dict) and payload.get("usage"):
+                                usage = payload["usage"]
+                        except Exception:  # noqa: BLE001
+                            pass
+                        q.put(chunk)
+                except Exception as exc:  # noqa: BLE001
+                    q.put(SENTINEL)
+                    q.put(exc)
+                    return
+                finally:
+                    await winner.close()
+                q.put(SENTINEL)
+                q.put(usage)
+
+            submit_coroutine(_pump())
+
             yield "data: " + json.dumps({
                 "meta": {
                     "request_id": request_id,

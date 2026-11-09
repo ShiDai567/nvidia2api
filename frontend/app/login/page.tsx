@@ -2,15 +2,15 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { KeyRound } from "lucide-react";
+import { Eye, EyeOff, KeyRound } from "lucide-react";
 import { NvidiaLogo } from "@/components/ui";
 import { api, setToken } from "@/lib/api";
 import { Button, Input } from "@/components/ui";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -20,7 +20,6 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const res = await api.post<{ token: string }>("/api/admin/login", {
-        username,
         password,
       });
       setToken(res.token);
@@ -40,23 +39,44 @@ export default function LoginPage() {
             <NvidiaLogo size={30} />
           </div>
           <h1 className="text-2xl font-semibold tracking-wide text-gray-100">NVIDIA2API</h1>
-          <p className="mt-1 text-sm text-gray-500">AI API Infrastructure Console</p>
+          <p className="mt-1 text-sm text-gray-500">输入管理密码，进入控制台</p>
         </div>
 
         <form onSubmit={submit} className="glass space-y-4 p-6">
-          <Input
-            placeholder="用户名"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            autoFocus
-          />
-          <Input
-            type="password"
-            placeholder="密码"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          {error && <p className="text-sm text-red-400">{error}</p>}
+          <label htmlFor="admin-password" className="block text-sm text-gray-300">
+            管理密码
+          </label>
+          <div className="relative">
+            <Input
+              id="admin-password"
+              name="password"
+              type={showPassword ? "text" : "password"}
+              placeholder="请输入管理密码"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              autoFocus
+              required
+              disabled={loading}
+              aria-invalid={!!error}
+              aria-describedby={error ? "login-error" : undefined}
+              className="pr-11"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              aria-label={showPassword ? "隐藏密码" : "显示密码"}
+              aria-pressed={showPassword}
+              className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-lg text-gray-400 hover:text-gray-200 focus-visible:outline focus-visible:outline-accent"
+            >
+              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+          {error && (
+            <p id="login-error" role="alert" className="text-sm text-red-400">
+              {error}
+            </p>
+          )}
           <Button
             variant="primary"
             className="w-full justify-center py-2.5"
@@ -64,7 +84,7 @@ export default function LoginPage() {
             type="submit"
           >
             <KeyRound size={15} />
-            登录
+            进入控制台
           </Button>
         </form>
       </div>

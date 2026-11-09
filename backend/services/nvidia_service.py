@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import httpx
 from django.conf import settings
+from django.db import transaction
+from django.utils import timezone
 
 NVIDIA_BASE = settings.NVIDIA_BASE_URL
 
@@ -28,14 +30,14 @@ def _list_models_anonymous(timeout: float = 30) -> tuple[int, dict]:
 
 
 def sync_models(api_key: str | None = None) -> dict:
-    """Pull model list from NVIDIA and upsert into AIModel.
+    """同步官方模型，返回下架明细、原启用模型冲突及恢复明细。
 
     NVIDIA 的 /v1/models 是公开端点（实测无 key/假 key 均返回 200），
     因此默认不再消耗/依赖任何 NVIDIA Key；显式传入 api_key 时仍会带上。
 
     与上游对齐：库中 provider="nvidia" 且上游已不存在的模型会被标记
     status="retired" 并禁用（软下架，不删记录；手动添加的非 nvidia
-    模型不受影响）。若上游恢复，再次同步会自动重新启用。
+    模型不受影响）。若上游恢复，再次同步只清除下架标记，不自动启用。
     """
     from apps.core.models import AIModel
 
@@ -43,37 +45,53 @@ def sync_models(api_key: str | None = None) -> dict:
         status_code, body = list_models_raw(api_key)
     else:
         status_code, body = _list_models_anonymous()
-    if status_code != 200 or "data" not in body:
-        raise ValueError(f"upstream_error:{status_code}")
+    if status_code != 200:
+        raise ValueError(f"NVIDIA 模型列表获取失败（HTTP {status_code}），本地模型未修改")
+    if not isinstance(body, dict) or not isinstance(body.get("data"), list):
+        raise ValueError("NVIDIA 模型列表格式异常，本地模型未修改")
     upstream_names: set[str] = set()
-    created, existing = 0, 0
-    for item in body.get("data", []):
+    for item in body["data"]:
+        if not isinstance(item, dict):
+            raise ValueError("NVIDIA 模型列表格式异常，本地模型未修改")
         name = item.get("id")
-        if not name:
-            continue
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("NVIDIA 模型列表缺少有效模型名称，本地模型未修改")
         upstream_names.add(name)
-        rec, was_created = AIModel.objects.get_or_create(
-            model_name=name, defaults={"provider": "nvidia"}
+    if not upstream_names and AIModel.objects.filter(provider="nvidia").exists():
+        raise ValueError("NVIDIA 返回空模型列表，为避免误下架本地模型，本次同步已取消")
+
+    created, existing = 0, 0
+    with transaction.atomic():
+        for name in sorted(upstream_names):
+            _, was_created = AIModel.objects.get_or_create(
+                model_name=name, defaults={"provider": "nvidia"}
+            )
+            if was_created:
+                created += 1
+            else:
+                existing += 1
+        local = AIModel.objects.filter(provider="nvidia").order_by("model_name")
+        # 已下架却被旧客户端重新开启的记录，也要重新禁用并报告冲突。
+        gone = list(local.exclude(model_name__in=upstream_names).exclude(
+            status="retired", enabled=False
+        ))
+        retired_models = [
+            {"id": m.id, "model_name": m.model_name, "was_enabled": m.enabled}
+            for m in gone
+        ]
+        restored_models = list(local.filter(
+            status="retired", model_name__in=upstream_names
+        ).values("id", "model_name"))
+        now = timezone.now()
+        AIModel.objects.filter(pk__in=[m.id for m in gone]).update(
+            status="retired", enabled=False, updated_at=now
         )
-        if was_created:
-            created += 1
-        else:
-            existing += 1
-    # 软下架：库里有、上游没有的 nvidia 模型
-    local = AIModel.objects.filter(provider="nvidia")
-    gone_ids = [m.id for m in local if m.model_name not in upstream_names]
-    retired = 0
-    if gone_ids:
-        retired = AIModel.objects.filter(pk__in=gone_ids).exclude(
-            status="retired"
-        ).update(status="retired", enabled=False)
-    # 已 retired 且上游恢复的模型：清除 retired 标记（enabled 仍由用户决定）。
-    # 注意：这一步必须在任何 gone_ids 下都执行，否则"只恢复、无下架"的同步
-    # 永远不会复活模型。
-    AIModel.objects.filter(provider="nvidia", status="retired").exclude(
-        pk__in=gone_ids
-    ).update(status="active")
+        AIModel.objects.filter(pk__in=[m["id"] for m in restored_models]).update(
+            status="active", enabled=False, updated_at=now
+        )
     return {
         "created": created, "existing": existing, "total": len(upstream_names),
-        "retired": retired,
+        "retired": len(retired_models), "retired_models": retired_models,
+        "conflicts": [m for m in retired_models if m["was_enabled"]],
+        "restored": len(restored_models), "restored_models": restored_models,
     }

@@ -84,6 +84,66 @@ class RaceTests(TestCase):
         winner, cancelled, result = self._race([(0.01, False), (0.01, False)])
         self.assertEqual(winner, -1)
 
+    def test_missing_local_file_is_classified_as_configuration_error(self):
+        route = make_route("r0", 0)
+        error, status = race_engine._classify_error(
+            FileNotFoundError(2, "No such file or directory")
+        )
+        self.assertEqual((error, status), ("local_file_error", 0))
+
+        with patch("services.race_engine.report_failure") as report_failure, \
+             patch("services.race_engine.report_proxy_result") as report_proxy_result:
+            race_engine._mark_failure(route, error, status)
+
+        report_failure.assert_not_called()
+        report_proxy_result.assert_not_called()
+
+    def test_non_stream_request_handles_file_error_while_creating_client(self):
+        route = make_route("r0", 0)
+
+        with patch("services.race_engine._client_timeout"), \
+             patch("services.loop.acquire_client",
+                   side_effect=FileNotFoundError(2, "No such file or directory")), \
+             patch("services.race_engine.report_failure") as report_failure:
+            result = asyncio.run(race_engine._do_request(
+                route, {}, "https://upstream"
+            ))
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error_type, "local_file_error")
+        self.assertIn("No such file or directory", result.error_message)
+        report_failure.assert_not_called()
+
+    def test_stream_request_handles_file_error_while_creating_client(self):
+        route = make_route("r0", 0)
+
+        with patch("services.race_engine._client_timeout"), \
+             patch("services.loop.acquire_client",
+                   side_effect=FileNotFoundError(2, "No such file or directory")), \
+             patch("services.race_engine.report_failure") as report_failure:
+            result, failure = asyncio.run(race_engine._stream_first_valid(
+                route, {}, "https://upstream"
+            ))
+
+        self.assertIsNone(result)
+        self.assertEqual(failure["error"].split(" ", 1)[0], "local_file_error")
+        self.assertIn("SSL_CERT_FILE", failure["error"])
+        report_failure.assert_not_called()
+
+    def test_all_failed_error_includes_upstream_http_status(self):
+        route = make_route("r0", 0)
+
+        async def failed_request(route, body, base_url, started=None):
+            return RaceResult(
+                ok=False, route=route, http_status=401, error_type="invalid_key"
+            )
+
+        with patch.object(race_engine, "_do_request", failed_request), \
+             self.assertRaises(AllRoutesFailed) as raised:
+            asyncio.run(race_engine._race([route], {}, "http://upstream"))
+
+        self.assertIn("HTTP 401", str(raised.exception))
+
 
 class StreamRaceTests(TestCase):
     def test_first_valid_stream_wins_rest_cancelled(self):
@@ -123,3 +183,19 @@ class StreamRaceTests(TestCase):
             routes = [make_route("r0", 0)]
             with self.assertRaises(AllRoutesFailed):
                 asyncio.run(race_engine.race_stream_winner(routes, {}, "http://x"))
+
+    def test_stream_all_failed_error_includes_upstream_http_status(self):
+        async def failed_stream(route, body, base_url):
+            return None, {
+                "name": route.name,
+                "error": "invalid_key",
+                "http_status": 401,
+            }
+
+        with patch.object(race_engine, "_stream_first_valid", failed_stream), \
+             self.assertRaises(AllRoutesFailed) as raised:
+            asyncio.run(race_engine.race_stream_winner(
+                [make_route("r0", 0)], {}, "http://upstream"
+            ))
+
+        self.assertIn("HTTP 401", str(raised.exception))

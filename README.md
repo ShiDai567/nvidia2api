@@ -11,12 +11,12 @@
 - **连接复用**：全局共享事件循环 + httpx 连接池，代理/直连线路的 TCP+TLS 连接跨请求复用，显著降低重复握手延迟。
 - **Key 池**：NVIDIA Key CRUD、批量导入（`name---key` 或纯 `key`，自动去重/自动命名）、默认 40 RPM、服务端滑动窗口限流（SQLite 原子条件更新）、429/401/403/5xx 自动冷却与状态管理（冷却时间可在设置页调整）。
 - **代理池**：SOCKS5/HTTP/HTTPS（支持账号密码）、批量导入、并发异步测速（延迟 + 公网 IP + 地理位置）、异常自动冷却；启用数量由后端强制 `≤ NVIDIA Key 数 - 1`（`N` 个 Key → 最多 `N-1` 代理 + 1 直连 = `N` 条线路）。
-- **模型管理**：从 NVIDIA 同步模型、启停控制，仅 `enabled=true` 的模型通过 OpenAI API 暴露。模型列表来自 NVIDIA 公开端点，**同步无需任何 Key**（空库也能同步）。同步与上游对齐：上游已下架的模型自动软下架（`status=retired` + 禁用，不删记录），上游恢复后自动清除标记。
+- **模型管理**：从 NVIDIA 同步模型、启停控制，仅 `enabled=true` 的模型通过 OpenAI API 暴露。模型列表来自 NVIDIA 公开端点，**同步无需任何 Key**（空库也能同步）。同步与上游对齐：上游已下架的模型自动软下架（`status=retired` + 禁用，不删记录），逐项提示原已启用的冲突模型；上游恢复后提示并清除下架标记，但不会自动启用。
 - **OpenAI 兼容 API**：`GET /v1/models`、`POST /v1/chat/completions`（含非流式与 `stream=true`）、`GET /health`。
 - **用户 API Key**：`sk-nvidia2api-*`，仅存 SHA-256 Hash（创建时完整展示一次），支持每 Key 独立限流、允许模型白名单（`allowed_models`）与统计。
 - **请求日志**：request_id、耗时、TTFT、Winner 线路、Key、代理、状态、Token 统计，敏感字段脱敏；支持分页、时间/模型/状态筛选；`python manage.py clean_logs` 定期清理。
 - **Dashboard**：Key/Proxy/Model/请求量/成功率/平均延迟/今日 Tokens/实时并发统计与实时状态（15 秒自动刷新）。
-- **管理后台**：`/api/admin/login`（用户名密码 → 固定 Token）鉴权，登录防爆破（5 分钟 10 次），支持 `Authorization: Bearer` 与 `Token` 两种头。
+- **管理后台**：`/api/admin/login`（仅管理密码 → 固定 Token）鉴权，登录防爆破（5 分钟 10 次），支持 `Authorization: Bearer` 与 `Token` 两种头。
 
 ## 技术栈
 
@@ -39,12 +39,12 @@ docs/        架构、数据库、模块、竞速引擎、Admin/OpenAI API、前
 ```bash
 cp .env.example .env
 
-# 后端
+# 后端（需安装 Python 3.12+ 和 uv）
 cd backend
-pip install -r requirements.txt
-python manage.py migrate
-python -m pytest tests          # 27 个测试：导入/限流/代理限制/竞速/并发安全
-python manage.py runserver 0.0.0.0:8000
+uv sync --dev
+uv run python manage.py migrate
+uv run pytest tests
+uv run python manage.py runserver 0.0.0.0:8000
 
 # 前端
 cd frontend
@@ -52,7 +52,7 @@ npm install
 npm run dev                     # http://localhost:3000
 ```
 
-默认管理员 `admin / admin123`，可通过 `.env` 的 `ADMIN_USERNAME/ADMIN_PASSWORD/ADMIN_TOKEN` 修改。Admin API 使用 `Authorization: Bearer $ADMIN_TOKEN` 鉴权。
+默认管理密码 `admin123`，可通过 `ADMIN_PASSWORD` 环境变量修改；Docker Compose 会从 `.env` 注入。Admin API 使用 `Authorization: Bearer $ADMIN_TOKEN` 鉴权。
 
 > **安全提醒**：生产部署务必修改默认口令（见「常见问题」）。
 
@@ -125,7 +125,7 @@ print(resp.choices[0].message.content)
 
 ```
 SECRET_KEY / DEBUG / DATA_DIR / DATABASE_PATH
-ADMIN_USERNAME / ADMIN_PASSWORD / ADMIN_TOKEN
+ADMIN_PASSWORD / ADMIN_TOKEN
 CORS_ALLOWED_ORIGINS
 NVIDIA_BASE_URL / DEFAULT_NVIDIA_RPM
 MAX_CONCURRENT_REQUESTS / MAX_ROUTES_PER_REQUEST
@@ -138,6 +138,7 @@ LOG_LEVEL / NEXT_PUBLIC_API_BASE_URL
 - **没有可用 Key / 线路**：确认已导入并启用 NVIDIA Key（`available` 状态），且启用代理数 ≤ Key 数 - 1。
 - **模型 404**：模型需在 Models 页启用（`enabled=true`）后才通过 `/v1` 暴露；若用户 Key 设置了 `allowed_models` 白名单，模型还需在白名单内。
 - **429**：要么用户 API Key 达到自身限流（响应带 `Retry-After`），要么所有 NVIDIA Key 均处于 `rate_limited`/冷却中。注意竞速会放大配额消耗，见「配额消耗须知」。
+- **测试 NVIDIA Key 显示 `[Errno 2] No such file or directory`**：通常是后端环境中 `SSL_CERT_FILE` / `SSL_CERT_DIR` 或 `HTTPS_PROXY` 指向不存在的文件/目录，不代表 Key 无效。检查后端进程或容器的环境变量及对应路径；Docker 部署请拉取最新镜像并重建容器（镜像已安装 CA 证书）。修复配置后重新测试，无需删除或重新导入 Key。
 - **代理测速失败**：确认协议格式（`socks5://host:port` 等）与连通性；测速失败不影响其他代理，也不影响请求整体成功。
 - **生产安全清单**：
   1. 修改 `ADMIN_PASSWORD` / `ADMIN_TOKEN` / `SECRET_KEY`（默认值仅供首次启动）；

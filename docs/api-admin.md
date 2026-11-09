@@ -4,7 +4,7 @@
 
 ```
 POST /api/admin/login
-{"username": "admin", "password": "admin123"}
+{"password": "<ADMIN_PASSWORD>"}
 → {"token": "<ADMIN_TOKEN>"}
 
 之后所有请求带：
@@ -13,7 +13,7 @@ Authorization: Token <token>
 Authorization: Bearer <token>
 ```
 
-用户名密码与 token 都来自 `.env`（`ADMIN_USERNAME` / `ADMIN_PASSWORD` / `ADMIN_TOKEN`）。
+登录只需管理密码，来自环境变量 `ADMIN_PASSWORD`；兼容旧客户端时会忽略额外的 `username` 字段。登录返回固定的 `ADMIN_TOKEN`，管理 API 后续仍须携带 Token。
 
 **安全说明**：
 - 登录接口有防爆破保护：同一 IP 5 分钟内失败 10 次后返回 429（`Retry-After: 300`）。
@@ -72,9 +72,9 @@ import 返回 `{success, duplicate, invalid, failed, errors[]}`。
 |---|---|---|
 | GET | `/api/admin/models?q=` | 列表 |
 | POST | `/api/admin/models` | 新建 |
-| PATCH | `/api/admin/models/{id}` | display_name/description/enabled |
+| PATCH | `/api/admin/models/{id}` | `display_name`/`description`/`enabled`；官方已下架模型不能启用（400 `model_retired`） |
 | DELETE | `/api/admin/models/{id}` | 删除 |
-| POST | `/api/admin/models/sync` | 从 NVIDIA 拉 `/v1/models` 并 upsert |
+| POST | `/api/admin/models/sync` | 从 NVIDIA 拉 `/v1/models` 并 upsert；同步结果含 `retired_models`、原已启用的 `conflicts`、`restored_models` 明细。官方下架模型软下架并禁用；官方恢复后仅清除下架标记，不自动启用 |
 
 ## 用户 API Key
 
@@ -110,4 +110,4 @@ POST /api/admin/chat
 ```
 
 非流式返回 `{request_id, payload, meta:{routes, duration_ms, usage,…}}`。
-流式返回 SSE：首包 `{"meta":{…}}` → 上游 chunk → 结束 `{"summary":{duration_ms,first_token_ms,prompt/completion/total/cached_tokens}}`。
+流式立即返回 SSE，并在上游首个有效 chunk 到达前每 5 秒发送一次注释心跳，避免反向代理在线路连接或慢模型准备首 token 时超时。竞速失败会作为 SSE `error` 事件和 `[DONE]` 发送（HTTP 状态已无法在流开始后修改）；成功时发送 `meta` → 上游 chunk → `summary`。

@@ -10,16 +10,23 @@ COPY frontend/ .
 RUN mkdir -p public && touch public/.gitkeep
 RUN npm run build
 
-# Stage 2: runtime (Node for Next.js + Python for Django, same container)
-FROM node:22-slim
+# Stage 2: Python runtime (Django 6 requires Python 3.12+)
+FROM python:3.12-slim-bookworm AS python-runtime
+
+# Stage 3: runtime (Node for Next.js + Python for Django, same container)
+FROM node:22-bookworm-slim
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 python3-pip \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=python-runtime /usr/local /usr/local
+COPY --from=ghcr.io/astral-sh/uv:0.11.11 /uv /uvx /bin/
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1 DATA_DIR=/app/data
 
-COPY backend/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
+COPY backend/pyproject.toml backend/uv.lock ./backend/
+RUN cd backend && uv sync --frozen --no-dev --no-install-project
+ENV PATH="/app/backend/.venv/bin:${PATH}"
 COPY backend/ .
 
 # Next.js standalone server + static assets

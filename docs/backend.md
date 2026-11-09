@@ -2,12 +2,15 @@
 
 ```
 backend/
+├── pyproject.toml    # 项目依赖与 pytest 配置
+├── uv.lock           # 锁定依赖版本
+├── .python-version   # 本地 Python 版本
 ├── manage.py
 ├── config/          # settings / urls / asgi
 ├── apps/core/       # models + AdminConfig.ready() 自动迁移
 ├── services/        # 纯业务，零 Django View
 ├── api/             # Admin API + OpenAI API
-└── tests/           # 27 个用例（导入/限流/竞速/并发/启停上限）
+└── tests/           # 后端测试
 ```
 
 ## services/
