@@ -564,7 +564,7 @@ class AdminChatView(AdminRequiredMixin, APIView):
         body["messages"] = messages
 
         if request.data.get("stream"):
-            return self._stream(body, model)
+            return self._stream(body, model, is_asgi=hasattr(request._request, "scope"))
 
         routes = build_routes()
         started = timezone.now().timestamp()
@@ -622,7 +622,7 @@ class AdminChatView(AdminRequiredMixin, APIView):
             },
         })
 
-    def _stream(self, body, model):
+    def _stream(self, body, model, *, is_asgi=False):
         """SSE: race streaming connections, first valid chunk wins, rest cancelled.
 
         Emits a leading `data: {"meta": {...}}` event describing the winning route,
@@ -786,7 +786,26 @@ class AdminChatView(AdminRequiredMixin, APIView):
                 }
             }) + "\n\n"
 
-        response = StreamingHttpResponse(gen(), content_type="text/event-stream")
-        response["Cache-Control"] = "no-cache"
+        if is_asgi:
+            from asgiref.sync import sync_to_async
+
+            async def async_gen():
+                iterator = gen()
+                end = object()
+                try:
+                    while True:
+                        item = await sync_to_async(next, thread_sensitive=True)(iterator, end)
+                        if item is end:
+                            break
+                        yield item
+                finally:
+                    await sync_to_async(iterator.close, thread_sensitive=True)()
+
+            content = async_gen()
+        else:
+            content = gen()
+        response = StreamingHttpResponse(content, content_type="text/event-stream")
+        # Next.js 的 gzip 压缩会缓冲小分片；禁止中间代理转换 SSE 响应。
+        response["Cache-Control"] = "no-cache, no-transform"
         response["X-Accel-Buffering"] = "no"
         return response

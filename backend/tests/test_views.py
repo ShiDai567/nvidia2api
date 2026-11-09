@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 
 from apps.core.models import AIModel, NvidiaApiKey, UserApiKey
 from services import api_key_service
@@ -141,6 +141,7 @@ class StreamingStatusTests(TestCase):
             resp = self._post_stream()
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp["Content-Type"], "text/event-stream")
+        self.assertIn("no-transform", resp["Cache-Control"])
         body = b"".join(resp.streaming_content).decode()
         self.assertIn('"content":"A"', body)
         self.assertIn("data: [DONE]", body)
@@ -267,6 +268,8 @@ class AdminChatViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "text/event-stream")
+        # Next.js 压缩中间件遵循 no-transform，否则 gzip 会攒满回复才发送。
+        self.assertIn("no-transform", response["Cache-Control"])
         body = b"".join(response.streaming_content).decode()
         self.assertIn('"code": "upstream_error"', body)
         self.assertIn("HTTP 401", body)
@@ -294,6 +297,113 @@ class AdminChatViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(next(iter(response.streaming_content)), b": keep-alive\n\n")
+
+    def test_asgi_stream_yields_before_upstream_finishes(self):
+        from concurrent.futures import Future
+        from asgiref.sync import async_to_sync
+        from django.test import AsyncRequestFactory
+        from api.admin_views import AdminChatView
+
+        future = Future()
+
+        def keep_pending(coro):
+            coro.close()
+            return future
+
+        request = AsyncRequestFactory().post(
+            "/api/admin/chat",
+            data=json.dumps({"model": "m/test", "stream": True,
+                             "messages": [{"role": "user", "content": "hi"}]}),
+            content_type="application/json",
+            headers={"Authorization": f"Token {self.admin_token}"},
+        )
+        with patch("services.loop.submit_coroutine", side_effect=keep_pending):
+            response = AdminChatView.as_view()(request)
+
+        self.assertTrue(response.is_async)
+
+        async def first_chunk():
+            iterator = response.streaming_content
+            chunk = await anext(iterator)
+            await iterator.aclose()
+            return chunk
+
+        self.assertEqual(async_to_sync(first_chunk)(), b": keep-alive\n\n")
+        self.assertFalse(future.done())
+
+
+class AdminChatASGIStreamingTests(TransactionTestCase):
+    def test_content_reaches_client_before_upstream_completes(self):
+        """通过完整 ASGI 处理链，首段文字必须在上游结束前发出。"""
+        import asyncio
+        from concurrent.futures import Future
+        from types import SimpleNamespace
+
+        from asgiref.sync import async_to_sync
+        from asgiref.testing import ApplicationCommunicator
+        from django.conf import settings
+        from django.test import AsyncRequestFactory
+
+        from config.asgi import application
+
+        AIModel.objects.create(model_name="m/test", enabled=True)
+        key = NvidiaApiKey.objects.create(name="k1", api_key="nvapi-k1")
+        release = Future()
+        closed = Future()
+
+        async def lines():
+            yield 'data: {"choices":[{"delta":{"content":"首段"}}]}\n\n'
+            await asyncio.wrap_future(release)
+            yield 'data: {"choices":[],"usage":{"total_tokens":3}}\n\n'
+            yield 'data: [DONE]\n\n'
+
+        async def close():
+            closed.set_result(True)
+
+        async def race(*args):
+            return SimpleNamespace(
+                route=SimpleNamespace(kind="direct", key=key, proxy=None),
+                report=[], lines=lines, close=close,
+            )
+
+        request = AsyncRequestFactory().post(
+            "/api/admin/chat",
+            data=json.dumps({"model": "m/test", "stream": True,
+                             "messages": [{"role": "user", "content": "hi"}]}),
+            content_type="application/json",
+            headers={"Authorization": f"Token {settings.ADMIN_TOKEN}"},
+        )
+
+        async def check():
+            communicator = ApplicationCommunicator(application, request.scope)
+            await communicator.send_input({"type": "http.request", "body": request.body})
+            try:
+                start = await communicator.receive_output(timeout=2)
+                self.assertEqual(start["status"], 200)
+                body = b""
+                while "首段".encode() not in body:
+                    event = await communicator.receive_output(timeout=2)
+                    self.assertEqual(event["type"], "http.response.body")
+                    body += event.get("body", b"")
+                self.assertFalse(release.done())
+                self.assertFalse(closed.done())
+                release.set_result(None)
+                while True:
+                    event = await communicator.receive_output(timeout=2)
+                    body += event.get("body", b"")
+                    if not event.get("more_body", False):
+                        break
+                self.assertIn(b'"summary"', body)
+                self.assertIn(b'"total_tokens": 3', body)
+                self.assertTrue(closed.done())
+                await communicator.wait(timeout=2)
+            finally:
+                if not release.done():
+                    release.set_result(None)
+                communicator.stop()
+
+        with patch("services.race_engine.race_stream", side_effect=race):
+            async_to_sync(check)()
 
 
 class LoginSecurityTests(TestCase):

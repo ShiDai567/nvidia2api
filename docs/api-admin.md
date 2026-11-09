@@ -111,3 +111,5 @@ POST /api/admin/chat
 
 非流式返回 `{request_id, payload, meta:{routes, duration_ms, usage,…}}`。
 流式立即返回 SSE，并在上游首个有效 chunk 到达前每 5 秒发送一次注释心跳，避免反向代理在线路连接或慢模型准备首 token 时超时。竞速失败会作为 SSE `error` 事件和 `[DONE]` 发送（HTTP 状态已无法在流开始后修改）；成功时发送 `meta` → 上游 chunk → `summary`。
+
+流式响应携带 `Cache-Control: no-cache, no-transform` 和 `X-Accel-Buffering: no`，避免 Next.js 反代压缩或代理缓冲导致内容在请求结束后才集中显示。

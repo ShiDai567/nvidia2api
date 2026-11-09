@@ -36,7 +36,7 @@ frontend/
 
 ## 几个非显然的实现
 
-**流式对话**（`chat/page.tsx`）：不用 fetch 的 SSE 库，直接 `reader.read()` + `\n\n` 分帧，自识别：
+**流式对话**（`chat/page.tsx` + `lib/chat-stream.ts`）：请求携带 `stream: true`，使用 `reader.read()` 增量解码并按 SSE 空行分帧，支持跨网络分片的中文与 CRLF。每次收到内容或思考分片就更新当前回复，无需等待请求结束。后端 SSE 响应使用 `Cache-Control: no-cache, no-transform`，避免 Next.js 反代的 gzip 压缩缓冲分片。自识别：
 
 | 帧 | 动作 |
 |---|---|

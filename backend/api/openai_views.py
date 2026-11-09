@@ -272,7 +272,8 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key):
         log.save()
 
     response = StreamingHttpResponse(gen(), content_type="text/event-stream")
-    response["Cache-Control"] = "no-cache"
+    # /v1 同样经过 Next.js 反代，避免 gzip 将流式分片缓冲到结束。
+    response["Cache-Control"] = "no-cache, no-transform"
     response["X-Accel-Buffering"] = "no"
     return _with_request_id(response, request_id)
 

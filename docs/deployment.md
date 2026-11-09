@@ -71,6 +71,8 @@ docker compose up -d
 ## 生产注意点
 
 - **前置代理**（nginx/caddy）需放行 SSE：`proxy_buffering off`，长连接 `read_timeout` ≥ `UPSTREAM_READ_TIMEOUT`（默认 120s）
+- 管理后台对话接口在 ASGI 下逐块发送 SSE；更新后需重启后端或重新构建并启动 Docker 镜像，前置代理仍须关闭响应缓冲。
+- SSE 响应携带 `Cache-Control: no-cache, no-transform`，使 Next.js 反代跳过 gzip 压缩，避免小分片被压缩缓冲到回复结束后才一起展示；前置代理也应保留该响应头。
 - 单实例 SQLite 适合中小流量；要承载大规模并发请迁移 PostgreSQL + Redis，并把 `MAX_CONCURRENT_REQUESTS` 提升
 - 定期备份 `./data/db.sqlite3`
 - 不要让 `/api/admin/*` 直接裸露公网，绑 Basic Auth 或放到内网域名
