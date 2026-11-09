@@ -6,11 +6,11 @@
 
 ## 核心能力
 
-- **多线路并发竞速**：一次请求 = 每个启用代理 1 条线路 + 1 条直连线路，每条线路绑定**不同的** NVIDIA Key，`asyncio` 并发 + `FIRST_COMPLETED` + 响应有效性校验，第一个**有效 AI 响应**即为 Winner，其余线路立即取消（连接释放、无后台残留）。
+- **多线路并发竞速**：一次请求使用代理线路和可配置数量的直连线路（默认 1，可在“设置 → 每次请求并行直连数”修改），每条线路绑定**不同的** NVIDIA Key，`asyncio` 并发 + `FIRST_COMPLETED` + 响应有效性校验，第一个**有效 AI 响应**即为 Winner，其余线路立即取消（连接释放、无后台残留）。
 - **流式响应**：支持 `stream=true` SSE，首个有效 chunk 到达即判定 Winner 并转发，其余线路取消。失败时返回真实 502/503 状态码（而非 200 内嵌错误），SDK 可正常重试。
 - **连接复用**：全局共享事件循环 + httpx 连接池，代理/直连线路的 TCP+TLS 连接跨请求复用，显著降低重复握手延迟。
 - **Key 池**：NVIDIA Key CRUD、批量导入（`name---key` 或纯 `key`，自动去重/自动命名）、默认 40 RPM、服务端滑动窗口限流（SQLite 原子条件更新）、429/401/403/5xx 自动冷却与状态管理（冷却时间可在设置页调整）。
-- **代理池**：SOCKS5/HTTP/HTTPS（支持账号密码）、批量导入、并发异步测速（延迟 + 公网 IP + 地理位置）、异常自动冷却；启用数量由后端强制 `≤ NVIDIA Key 数 - 1`（`N` 个 Key → 最多 `N-1` 代理 + 1 直连 = `N` 条线路）。
+- **代理池**：SOCKS5/HTTP/HTTPS（支持账号密码）、批量导入、并发异步测速（延迟 + 公网 IP + 地理位置）、异常自动冷却；启用上限由后端强制为 `max(NVIDIA Key 数 - 配置直连数, 0)`，为直连预留独立 Key。
 - **模型管理**：从 NVIDIA 同步模型、启停控制，仅 `enabled=true` 的模型通过 OpenAI API 暴露。模型列表来自 NVIDIA 公开端点，**同步无需任何 Key**（空库也能同步）。同步与上游对齐：上游已下架的模型自动软下架（`status=retired` + 禁用，不删记录），逐项提示原已启用的冲突模型；上游恢复后提示并清除下架标记，但不会自动启用。
 - **OpenAI 兼容 API**：`GET /v1/models`、`POST /v1/chat/completions`（含非流式与 `stream=true`）、`GET /health`。
 - **用户 API Key**：`sk-nvidia2api-*`，仅存 SHA-256 Hash（创建时完整展示一次），支持每 Key 独立限流、允许模型白名单（`allowed_models`）与统计。
@@ -70,7 +70,7 @@ docker compose up -d
 ## 使用流程
 
 1. 登录控制台 → **NVIDIA Keys** → 批量导入 Key（`主账号01---nvapi-xxx` 或每行一个 `nvapi-xxx`，自动去重/自动命名）
-2. **Proxies** → 批量导入代理、测速、获取 IP、启用（数量受 Key 数 - 1 限制）
+2. **Proxies** → 批量导入代理、测速、获取 IP、启用（数量受 Key 数减去配置直连数限制）
 3. **Models** → 点击「同步 NVIDIA 模型」，启用要暴露的模型
 4. **API Keys** → 创建用户 Key（完整 Key 仅显示一次）
 5. 用 OpenAI SDK 调用：
@@ -107,7 +107,7 @@ print(resp.choices[0].message.content)
 
 竞速会对每条候选线路分别向上游发起真实请求并占用对应 Key 的 RPM 配额：
 
-- 每个启用代理线路 + 1 条直连 = 每次用户请求消耗 **K 个 Key 配额**（K = 本次竞速线路数）。
+- 每次用户请求消耗 **K 个 Key 配额**（K = 本次竞速的代理线路数 + 直连线路数）；增大并行直连数会增加单次请求的配额消耗。
 - 败者线路的上游请求会被尽快取消，但 NVIDIA 侧通常已计入受理。
 - 因此 **实际可用吞吐 ≈ Σ(Key RPM) / 竞速线路数**。例如 3 个 Key × 40 RPM、3 条线路竞速 → 用户侧约 40 请求/分钟，而不是 120。
 - 若吞吐优先于延迟，可在设置页调小 `max_routes_per_request`（如设为 1 = 不竞速，等价轮询负载均衡）。
@@ -135,7 +135,7 @@ LOG_LEVEL / NEXT_PUBLIC_API_BASE_URL
 
 ## 常见问题
 
-- **没有可用 Key / 线路**：确认已导入并启用 NVIDIA Key（`available` 状态），且启用代理数 ≤ Key 数 - 1。
+- **没有可用 Key / 线路**：确认已导入并启用 NVIDIA Key（`available` 状态），检查 Key 的 RPM 和冷却情况；代理启用上限为 `max(Key 数 - 配置直连数, 0)`。
 - **模型 404**：模型需在 Models 页启用（`enabled=true`）后才通过 `/v1` 暴露；若用户 Key 设置了 `allowed_models` 白名单，模型还需在白名单内。
 - **429**：要么用户 API Key 达到自身限流（响应带 `Retry-After`），要么所有 NVIDIA Key 均处于 `rate_limited`/冷却中。注意竞速会放大配额消耗，见「配额消耗须知」。
 - **测试 NVIDIA Key 显示 `[Errno 2] No such file or directory`**：通常是后端环境中 `SSL_CERT_FILE` / `SSL_CERT_DIR` 或 `HTTPS_PROXY` 指向不存在的文件/目录，不代表 Key 无效。检查后端进程或容器的环境变量及对应路径；Docker 部署请拉取最新镜像并重建容器（镜像已安装 CA 证书）。修复配置后重新测试，无需删除或重新导入 Key。

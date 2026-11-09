@@ -15,6 +15,7 @@ from apps.core.models import SystemSetting
 RUNTIME_PARAMS: dict[str, tuple[str, object, str]] = {
     "default_nvidia_rpm": ("int", lambda: settings.DEFAULT_NVIDIA_RPM, "NVIDIA Key 默认每分钟请求数"),
     "max_routes_per_request": ("int", lambda: settings.MAX_ROUTES_PER_REQUEST, "单次请求最大并行线路数"),
+    "direct_routes_per_request": ("int", lambda: settings.DIRECT_ROUTES_PER_REQUEST, "每次请求并行直连数（至少 1 条，每条使用不同 Key；受可用 Key 数和总线路上限限制）"),
     "proxy_timeout": ("float", lambda: settings.PROXY_TIMEOUT, "代理测速超时（秒）"),
     "upstream_connect_timeout": ("float", lambda: settings.UPSTREAM_CONNECT_TIMEOUT, "上游连接超时（秒）"),
     "upstream_read_timeout": ("float", lambda: settings.UPSTREAM_READ_TIMEOUT, "上游读超时（秒）"),
@@ -61,6 +62,15 @@ def all_params() -> list[dict]:
 
 
 def set_params(updates: dict) -> None:
+    # 先校验整批更新，避免无效直连数导致同一次请求的其他设置部分保存。
+    direct = updates.get("direct_routes_per_request")
+    if direct is not None:
+        try:
+            valid = not isinstance(direct, bool) and int(str(direct)) >= 1
+        except (TypeError, ValueError):
+            valid = False
+        if not valid:
+            raise ValueError("每次请求并行直连数必须为大于等于 1 的整数")
     for key, value in updates.items():
         if key not in RUNTIME_PARAMS:
             continue

@@ -44,7 +44,7 @@ NVIDIA2API 是面向 NVIDIA AI API 的聚合代理平台：
 2. **同步视图 + 共享后台事件循环**：竞速在常驻后台线程的单一 event loop 上执行（`services/loop.py`），httpx 连接按代理维度池化、跨请求复用（TCP+TLS 免重复握手）；视图保持同步，避免 ASGI 迁移复杂度。
 3. **SQLite 并发控制**：Key 的 RPM 计数用数据库侧条件 `UPDATE ... WHERE count < rpm_limit`，放弃 `SELECT FOR UPDATE`，避免 SQLite 锁升级死锁（detail 见 [database.md](database.md)）。
 4. **运行时参数优先于环境变量**：`SystemSetting` 表中的值覆盖 `.env`，改后即时生效（`sysconfig.py`）。
-5. **线路数 = 启用代理数 + 1 直连**：代理数量上限 = NVIDIA Key 数 − 1，由后端在 `set_enabled` 强制（不是前端校验）。
+5. **直连数可配置**：`direct_routes_per_request` 默认 1，至少 1；线路数受可调度代理数、配置直连数、可用 Key 和总线路上限约束。后端 `set_enabled` 强制代理上限为 `max(未禁用 Key 数 − 配置直连数, 0)`，调度优先为直连预留名额。
 6. **流式错误语义**：流式请求的竞速在返回响应对象**之前**完成——全部线路失败返回真实 502/503 JSON，Winner 确认后才返回 200 + SSE；chunk 通过线程安全队列从事件循环泵给 Django 生成器，事件循环永不被生成器阻塞。注意泵送协程必须用 `submit_coroutine`（fire-and-forget）：若改成阻塞等待（`run_coroutine`），会把整条上游流先灌满队列才返回响应，客户端就会看到"全部一次性蹦出"而非逐字流式。
 
 ## 请求路径（聊天）
@@ -56,7 +56,7 @@ POST /v1/chat/completions
   验证 allowed_models 白名单（若配置）
   用户 Key 限流（rate_limit>0 才计数；429 带 Retry-After）
   全局并发信号量
-  build_routes() → [代理+Key]*N + [直连+Key]
+  build_routes() → [直连+Key]*D + [代理+Key]*P
   race (asyncio.FIRST_COMPLETED, 共享 loop + 连接池)
     ├ 首个"有效响应"判定 Winner（见 race-engine.md）
     ├ 其余任务 cancel + 连接归还连接池

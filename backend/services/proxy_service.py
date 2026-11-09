@@ -10,6 +10,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.core.models import NvidiaApiKey, NvidiaApiKeyStatus, Proxy, ProxyStatus
+from services import sysconfig
 
 logger = logging.getLogger("nvidia2api.proxy")
 
@@ -20,7 +21,7 @@ def max_proxies_for_current_keys() -> int:
     n = NvidiaApiKey.objects.exclude(
         status=NvidiaApiKeyStatus.DISABLED
     ).count()
-    return max(n - 1, 0)
+    return max(n - max(1, sysconfig.get("direct_routes_per_request")), 0)
 
 
 def enabled_proxy_count() -> int:
@@ -84,10 +85,10 @@ def bulk_import_proxies(text: str) -> dict:
 
 
 def set_enabled(proxy: Proxy, enabled: bool) -> tuple[bool, str]:
-    """Enforce: enabled proxies <= number of NVIDIA keys - 1."""
+    """启用代理数不超过 NVIDIA Key 数减去配置的直连数。"""
     if enabled and not proxy.enabled:
         n_keys = NvidiaApiKey.objects.exclude(status=NvidiaApiKeyStatus.DISABLED).count()
-        max_allowed = max(n_keys - 1, 0)
+        max_allowed = max_proxies_for_current_keys()
         current = Proxy.objects.filter(enabled=True).count()
         if current >= max_allowed:
             msg = (

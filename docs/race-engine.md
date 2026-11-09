@@ -5,12 +5,15 @@
 ## 线路构建
 
 ```
-N = min(启用代理数 + 1, 可用 Key 数, max_routes_per_request)
-route[i]   = proxy[i]  + key[i]      (i < N-1)
-route[N-1] = 直连      + key[N-1]
+D = min(direct_routes_per_request, 可用 Key 数, max_routes_per_request)
+N = min(可调度代理数 + D, 可用 Key 数, max_routes_per_request)
+route[0:D] = 直连 + 各自独立的 Key
+route[D:N] = proxy[0:N-D] + 各自独立的 Key
 ```
 
-每个 Key 通过 `claim_rpm_slot` 原子地领到窗口配额后才进线路，一次请求内没有 Key 复用。
+`direct_routes_per_request` 默认 1，至少 1；管理后台“设置 → 每次请求并行直连数”保存后立即生效。直连优先占用名额；Key 不足或总线路上限较低时自动缩减。代理启用上限为 `max(未禁用 Key 数 - 配置直连数, 0)`，增加直连数后已有超额代理保留配置，构建线路时按剩余名额裁剪。
+
+每个 Key 通过 `claim_rpm_slot` 原子地领到窗口配额后才进线路，一次请求内没有 Key 复用。若配额被并发请求抢占，会继续尝试后续可用 Key；最终线路数可少于计划数量。竞速引擎对所有直连与代理线路使用相同的有效响应判定。
 
 ## 有效响应判定
 

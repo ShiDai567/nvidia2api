@@ -40,6 +40,8 @@ GET /health  →  {"status": "ok"}
 | `GET /api/admin/dashboard/usage?days=7` | 按天的 token 明细（prompt/completion/total + 请求数，按本地时区分桶） |
 | `GET/PATCH /api/admin/settings` | 运行参数。GET 返回 `[{key,type,value,default,description}]`；PATCH body `{settings:{key:value,...}}` |
 
+`direct_routes_per_request` 设置每次请求并行参与竞速的直连数，默认 1，必须是大于等于 1 的整数，保存后立即生效。例如：`{"settings":{"direct_routes_per_request":3}}`。传 `null` 恢复环境默认值；非法输入返回 400，整批设置不保存。实际直连数受可用 Key 数和 `max_routes_per_request` 限制，每条直连使用不同 Key。
+
 ## NVIDIA Keys
 
 | 方法 | 路径 | 说明 |
@@ -58,10 +60,10 @@ import 返回 `{success, duplicate, invalid, failed, errors[]}`。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/admin/proxies` | 列表 + summary（nvidia_keys、max_enabled_proxies、enabled、total_routes） |
+| GET | `/api/admin/proxies` | 列表 + summary（nvidia_keys、max_enabled_proxies、enabled_proxies、direct_routes、total_routes）；线路统计为上限，实际调度还受 Key RPM、冷却和代理健康限制 |
 | POST | `/api/admin/proxies` / `import` | 新增 / 批量导入（格式同 Key，`socks5://user:pass@host:port`） |
-| POST | `/api/admin/proxies/bulk` | 批量操作 `{action: enable\|disable\|delete\|check, ids: [...]}`；enable 时后端强制 N−1 上限 |
-| PATCH | `/api/admin/proxies/{id}` | 改字段；密码传 `••••••` 视为未修改；修改 host/port/protocol/username 后状态重置为 unknown；`{"enabled":true}` 超过 N−1 上限时返回 400 `proxy_limit_exceeded` |
+| POST | `/api/admin/proxies/bulk` | 批量操作 `{action: enable\|disable\|delete\|check, ids: [...]}`；enable 时后端强制 `max(未禁用 Key 数−配置直连数, 0)` 上限 |
+| PATCH | `/api/admin/proxies/{id}` | 改字段；密码传 `••••••` 视为未修改；修改 host/port/protocol/username 后状态重置为 unknown；`{"enabled":true}` 超过代理启用上限时返回 400 `proxy_limit_exceeded` |
 | POST | `/api/admin/proxies/{id}/fetch-ip` | 获取公网 IP + 归属地（多源回退，风控不计失败） |
 | POST | `/api/admin/proxies/check-all` | 一键检测全部启用代理（低并发 + 错峰防风控；返回 `{total, ok, failed, rate_limited}`） |
 | DELETE | `/api/admin/proxies/{id}` | 删除 |

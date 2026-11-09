@@ -1,8 +1,8 @@
-"""Route construction: NVIDIA keys paired with proxies + one direct route.
+"""线路构建：NVIDIA Key 与代理线路、可配置数量的直连线路配对。
 
 Rules:
 - One request uses at most N routes, N = number of schedulable keys.
-- Enabled proxies <= N - 1 (enforced on enable), so routes = proxies + 1 direct.
+- 启用代理上限为 Key 数减去配置的直连数，调度时优先预留直连名额。
 - One NVIDIA key is never used by two routes within the same request.
 - RPM slots are claimed atomically so concurrent requests share the budget safely.
 """
@@ -36,9 +36,8 @@ class Route:
 def build_routes(max_routes: int | None = None) -> list[Route]:
     """Build race routes.
 
-    Route count = min(启用代理数 + 1 直连, 可用 Key 数, max_routes_per_request)。
-    每个代理占一条线路，再加上恰好 1 条直连；每条线路分配不同的 Key。
-    多出来的 Key 由调度层（LRU/成功率/RPM）留给后续请求轮换，不产生冗余直连。
+    线路数 = min(可调度代理数 + 配置直连数, 可用 Key 数, 总线路上限)。
+    优先为直连预留名额，每条线路分配不同的 Key，多余 Key 留给后续请求轮换。
     """
     cfg_max = sysconfig.get("max_routes_per_request")
     max_routes = min(max_routes or cfg_max, cfg_max)
@@ -46,19 +45,21 @@ def build_routes(max_routes: int | None = None) -> list[Route]:
     proxies = proxy_service.schedulable_proxies()
     keys = key_service.available_keys()
 
-    route_count = min(len(proxies) + 1, len(keys), max_routes)
+    direct_count = min(max(1, sysconfig.get("direct_routes_per_request")), len(keys), max_routes)
+    route_count = min(len(proxies) + direct_count, len(keys), max_routes)
     if route_count <= 0:
         return []
-    proxies = proxies[: route_count - 1]
+    proxies = proxies[: route_count - direct_count]
 
     routes: list[Route] = []
-    for i in range(route_count):
-        key = keys[i]
+    # 先领取直连名额；并发请求抢走 RPM 配额时尝试后续 Key，避免丢失直连线路。
+    for key in keys:
+        if len(routes) >= route_count:
+            break
         if not key_service.claim_rpm_slot(key.id):
             continue
-        proxy = proxies[i] if i < len(proxies) else None
+        proxy_index = len(routes) - direct_count
+        proxy = proxies[proxy_index] if proxy_index >= 0 else None
         routes.append(Route(kind="proxy" if proxy else "direct", key=key, proxy=proxy))
 
-    # 保证恰好 1 条直连：若最后一条恰好也是直连（即 proxies 已全部用完），无需额外处理
-    # 由于 proxies 被裁剪到 route_count-1，最后一条必然是 direct。
     return routes

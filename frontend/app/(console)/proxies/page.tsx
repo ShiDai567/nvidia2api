@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Activity, Globe, Pencil, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
-import { api, asList, NvidiaKey, Proxy } from "@/lib/api";
+import { api, asList, Proxy, ProxySummary } from "@/lib/api";
 import {
   Badge,
   Button,
@@ -25,6 +25,9 @@ export default function ProxiesPage() {
   const [proxies, setProxies] = useState<Proxy[]>([]);
   const [keyCount, setKeyCount] = useState(0);
   const [enabledCount, setEnabledCount] = useState(0);
+  const [maxProxies, setMaxProxies] = useState(0);
+  const [directRoutes, setDirectRoutes] = useState(0);
+  const [totalRoutes, setTotalRoutes] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [importOpen, setImportOpen] = useState(false);
@@ -36,20 +39,18 @@ export default function ProxiesPage() {
   const [checkingAll, setCheckingAll] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
-  const maxProxies = Math.max(keyCount - 1, 0);
-
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const [p, k] = await Promise.all([
-        api.get("/api/admin/proxies"),
-        api.get("/api/admin/nvidia-keys"),
-      ]);
+      const p = await api.get<{ results: Proxy[]; summary: ProxySummary }>("/api/admin/proxies");
       const proxyList = asList<Proxy>(p);
       setProxies(proxyList);
-      setEnabledCount(proxyList.filter((x) => x.enabled).length);
-      setKeyCount(asList<NvidiaKey>(k).length);
+      setEnabledCount(p.summary.enabled_proxies);
+      setKeyCount(p.summary.nvidia_keys);
+      setMaxProxies(p.summary.max_enabled_proxies);
+      setDirectRoutes(p.summary.direct_routes);
+      setTotalRoutes(p.summary.total_routes);
       setSelected(new Set());
     } catch (e) {
       setError(e instanceof Error ? e.message : "加载失败");
@@ -241,14 +242,14 @@ export default function ProxiesPage() {
           </b>
           <span className="text-gray-600"> / {maxProxies}（最多）</span>
         </span>
-        <span className="text-gray-400">直连线路：1</span>
+        <span className="text-gray-400">直连线路：{directRoutes}</span>
         <span className="text-gray-400">
-          当前总线路：<b className="text-gray-100">{Math.min(enabledCount, maxProxies) + 1}</b>
+          当前总线路上限：<b className="text-gray-100">{totalRoutes}</b>
         </span>
         {enabledCount > maxProxies && (
           <span className="text-xs text-red-400">
-            已超出上限（Key 可能被删除过），多余代理不会被调度，请禁用 {enabledCount - maxProxies}{" "}
-            个
+            已超出上限（Key 数或直连配置已变更），调度时会裁剪多余代理，可禁用{" "}
+            {enabledCount - maxProxies} 个
           </span>
         )}
         {enabledCount === maxProxies && maxProxies > 0 && (

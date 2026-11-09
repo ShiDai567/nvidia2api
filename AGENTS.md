@@ -31,7 +31,7 @@ npm run test:mutation                  # 独立运行，手动或夜间，不属
 
 - **settings 不读 `.env` 文件**，只读环境变量（docker-compose/docker run 注入；本地需 `export` 或自行加载）。后端命令使用 `uv run`；后端目录下运行测试会用 `data/test_db.sqlite3`，真实库是 `data/db.sqlite3`。
 - `settings.py` 设了 `DJANGO_ALLOW_ASYNC_UNSAFE=true`：竞速引擎在 asyncio 单事件循环内做短暂序列化 SQLite 写，这是有意设计；RPM 计数用 SQL 条件更新（`UPDATE ... WHERE count < rpm_limit`）保证原子性，**不要**改成读-改-写。
-- 代理启用数被后端强制 `≤ NVIDIA Key 数 - 1`（每 Key 一条线路，留 1 条直连），改此规则要同步改竞速引擎和测试。
+- 直连数由运行参数 `direct_routes_per_request` 配置（默认 1，至少 1），每条线路使用不同 Key；代理启用上限为 `max(NVIDIA Key 数 - 配置直连数, 0)`。调度优先预留直连名额，受可用 Key 和总线路上限限制；改此规则要同步改线路构建和测试。
 - 用户 API Key（`sk-nvidia2api-*`）只存 SHA-256 hash；Admin API 鉴权是固定 token：`Authorization: Bearer $ADMIN_TOKEN`（不是登录换短期 token）。
 - Docker 是单镜像：Django 只监听容器内 `127.0.0.1:8000`，Next.js (`output: "standalone"`) 通过 `next.config.mjs` rewrites 把 `/api`、`/v1` 反代给后端（后端地址取 `BACKEND_INTERNAL_URL`）。本地 dev 则前端调 `NEXT_PUBLIC_API_BASE_URL`。
 - **CI（`.gitlab-ci.yml`）只在打 Tag 时构建镜像并建 release**；MR 仅有手动触发入口。没有跑 lint/test 的 CI。

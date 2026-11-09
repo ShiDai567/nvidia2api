@@ -107,13 +107,13 @@ TLS 由受控入口终止。管理 API 需额外限制网络暴露；前端通�
 调度候选由可用且未冷却的 NVIDIA Key 与可调度代理组成。代理按健康状态及已测延迟排序；Key 依据 RPM 额度、可用状态、冷却、最近使用和失败表现参与轮换。实际调度应遵守以下不变量：
 
 ```text
-enabled_proxy_count <= max(available_nvidia_key_count - 1, 0)
-route_count <= min(enabled_schedulable_proxy_count + 1,
+enabled_proxy_count <= max(non_disabled_nvidia_key_count - direct_routes_per_request, 0)
+route_count <= min(enabled_schedulable_proxy_count + direct_routes_per_request,
                    available_key_count,
                    max_routes_per_request,
                    configured_resource_limit)
 每个请求内，每个 NVIDIA Key 最多分配给一条 Route
-Direct Route 使用一个独立 NVIDIA Key
+每条 Direct Route 使用一个独立 NVIDIA Key，直连数默认 1，可在设置页配置，优先预留名额
 ```
 
 Key RPM 通过数据库条件更新原子领取，不使用 SQLite `SELECT FOR UPDATE` 或读-改-写。代理启用/Key 删除等竞争管理操作必须在事务或等效串行化边界下维护代理数量不变量；请求构建时仍需重新校验，避免将界面状态当作最终约束。每次竞速实际启动 Route 数及各线路结局须可观测。

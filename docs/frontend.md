@@ -50,6 +50,8 @@ frontend/
 
 **Token 图表**（仪表盘）：纯 SVG/CSS 柱状图，hover 查看明细，无第三方图表库。
 
+**并行直连设置**：设置页“每次请求并行直连数”（`direct_routes_per_request`）默认 1，最小 1，保存后立即生效。代理页从后端 `summary` 读取直连数、代理启用上限和总线路上限，实际线路数仍受 Key RPM、冷却及代理健康限制。
+
 **日志总行展开**：每行用 `Fragment key={request_id}` 包住两行 `<tr>`（数据 + 明细），不加 key 会触发 React 警告。
 
 ## 本地开发

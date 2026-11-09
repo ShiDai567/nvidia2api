@@ -239,6 +239,14 @@ export interface RuntimeParam {
   description: string;
 }
 
+export interface ProxySummary {
+  nvidia_keys: number;
+  max_enabled_proxies: number;
+  enabled_proxies: number;
+  direct_routes: number;
+  total_routes: number;
+}
+
 export interface TokenUsageDay {
   date: string;
   prompt_tokens: number;

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw, RotateCcw, Save } from "lucide-react";
 import { api, RuntimeParam } from "@/lib/api";
-import { Button, Card, Field, Input, PageHeader } from "@/components/ui";
+import { Button, Card, Input, PageHeader } from "@/components/ui";
 import { toast } from "@/components/toaster";
 
 export default function SettingsPage() {
@@ -84,13 +84,19 @@ export default function SettingsPage() {
             {params.map((p) => (
               <div key={p.key} className="flex items-center gap-4 py-3.5 first:pt-0 last:pb-0">
                 <div className="w-72 shrink-0">
-                  <code className="text-xs text-accent/90">{p.key}</code>
+                  <code className="text-xs text-accent/90">
+                    {p.key === "direct_routes_per_request" ? "每次请求并行直连数" : p.key}
+                  </code>
                   <p className="mt-0.5 text-xs text-gray-500">{p.description}</p>
                 </div>
                 <div className="flex flex-1 items-center gap-2">
                   <Input
                     type="number"
                     step={p.type === "float" ? "0.1" : "1"}
+                    min={p.key === "direct_routes_per_request" ? 1 : undefined}
+                    aria-label={
+                      p.key === "direct_routes_per_request" ? "每次请求并行直连数" : p.key
+                    }
                     value={draft[p.key] ?? ""}
                     onChange={(e) => setDraft((d) => ({ ...d, [p.key]: e.target.value }))}
                     className="w-40"

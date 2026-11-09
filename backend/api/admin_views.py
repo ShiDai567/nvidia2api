@@ -154,7 +154,11 @@ class ProxyListView(AdminRequiredMixin, APIView):
     def get(self, request):
         qs = Proxy.objects.order_by("id")
         n_keys = NvidiaApiKey.objects.exclude(status=NvidiaApiKeyStatus.DISABLED).count()
-        max_allowed = max(n_keys - 1, 0)
+        from services import sysconfig
+
+        direct = min(n_keys, max(1, sysconfig.get("direct_routes_per_request")),
+                     sysconfig.get("max_routes_per_request"))
+        max_allowed = proxy_service.max_proxies_for_current_keys()
         enabled = qs.filter(enabled=True).count()
         return Response({
             "results": ProxySerializer(qs, many=True).data,
@@ -162,8 +166,9 @@ class ProxyListView(AdminRequiredMixin, APIView):
                 "nvidia_keys": n_keys,
                 "max_enabled_proxies": max_allowed,
                 "enabled_proxies": enabled,
-                "direct_routes": 1 if n_keys else 0,
-                "total_routes": enabled + (1 if n_keys else 0),
+                "direct_routes": direct,
+                "total_routes": min(n_keys, enabled + direct,
+                                    sysconfig.get("max_routes_per_request")),
             },
         })
 
@@ -459,7 +464,6 @@ class DashboardView(AdminRequiredMixin, APIView):
         agg = logs_today.filter(status="success").aggregate(
             avg_ms=Avg("duration_ms"), total_tokens=Sum("total_tokens"))
 
-        n_active_keys = keys.exclude(status=NvidiaApiKeyStatus.DISABLED).count()
         enabled_proxies = proxies.filter(enabled=True).count()
         return Response({
             "nvidia_keys": keys.count(),
@@ -467,7 +471,7 @@ class DashboardView(AdminRequiredMixin, APIView):
                 status__in=[NvidiaApiKeyStatus.DISABLED, NvidiaApiKeyStatus.INVALID]).count(),
             "proxies": proxies.count(),
             "enabled_proxies": enabled_proxies,
-            "max_enabled_proxies": max(n_active_keys - 1, 0),
+            "max_enabled_proxies": proxy_service.max_proxies_for_current_keys(),
             "models": AIModel.objects.count(),
             "enabled_models": AIModel.objects.filter(enabled=True).count(),
             "requests_today": today_count,
@@ -499,7 +503,10 @@ class SettingsView(AdminRequiredMixin, APIView):
             if not key:
                 return Response({"detail": "settings or key required"}, status=400)
             updates = {key: request.data.get("value")}
-        sysconfig.set_params(updates)
+        try:
+            sysconfig.set_params(updates)
+        except ValueError as exc:
+            return Response({"error": {"message": str(exc), "code": "bad_request"}}, status=400)
         return Response(sysconfig.all_params())
 
 
