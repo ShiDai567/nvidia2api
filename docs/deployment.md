@@ -69,6 +69,20 @@ docker compose up -d
 
 仅后端 + 已有前端静态资源可用根 `Dockerfile`：前端先 build（Node 22 阶段），后端挂在 Python 3.12-slim，`DATA_DIR=/app/data`。
 
+## CI 基础镜像拉取
+
+Tag 流水线使用 Docker-in-Docker 构建并推送镜像，成功后创建 GitLab Release。CI 默认通过 `mirror.gcr.io/library` 拉取 Node 和 Python 官方基础镜像；`uv` 仍从 `ghcr.io/astral-sh/uv` 拉取。
+
+若构建在 `load metadata` 阶段报 `registry-1.docker.io ... EOF`，说明拉取基础镜像的网络连接中断，应用构建尚未开始。可在 GitLab 项目的 **Settings → CI/CD → Variables** 中设置 `DOCKERHUB_PREFIX`，覆盖为 Runner 可访问的可信缓存或私有仓库前缀（包含 `library` 路径，仓库内需提供相同镜像和标签）。直连 Docker Hub 时设为 `docker.io/library`。
+
+本地构建默认使用 Docker Hub，也可以显式指定缓存源：
+
+```bash
+docker build --build-arg DOCKERHUB_PREFIX=mirror.gcr.io/library -t nvidia2api:local .
+```
+
+该参数仅影响 Dockerfile 内的 Node/Python 基础镜像，不影响 Runner 启动任务时拉取 `docker:27-cli`、`docker:27-dind` 或 Release 任务镜像。若这些镜像拉取失败，需在 Runner 层配置可用的镜像源。修改 CI 配置后需在包含修改的提交上运行流水线；重试旧 Tag 的任务仍会使用该 Tag 的旧配置。
+
 ## 生产注意点
 
 - **前置代理**（nginx/caddy）需放行 SSE：`proxy_buffering off`，长连接 `read_timeout` ≥ `UPSTREAM_READ_TIMEOUT`（默认 120s）

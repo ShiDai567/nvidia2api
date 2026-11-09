@@ -1,7 +1,10 @@
 # nvidia2api all-in-one image: Django (127.0.0.1:8000, internal) + Next.js (:3000, only exposed port)
 
+# CI 可覆盖为镜像缓存前缀；本地默认从 Docker Hub 拉取。
+ARG DOCKERHUB_PREFIX=docker.io/library
+
 # Stage 1: build frontend standalone
-FROM node:22-slim AS fe
+FROM ${DOCKERHUB_PREFIX}/node:22-slim AS fe
 WORKDIR /fe
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
@@ -11,10 +14,10 @@ RUN mkdir -p public && touch public/.gitkeep
 RUN npm run build
 
 # Stage 2: Python runtime (Django 6 requires Python 3.12+)
-FROM python:3.12-slim-bookworm AS python-runtime
+FROM ${DOCKERHUB_PREFIX}/python:3.12-slim-bookworm AS python-runtime
 
 # Stage 3: runtime (Node for Next.js + Python for Django, same container)
-FROM node:22-bookworm-slim
+FROM ${DOCKERHUB_PREFIX}/node:22-bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && update-ca-certificates \

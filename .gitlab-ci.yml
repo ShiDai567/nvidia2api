@@ -9,6 +9,8 @@ variables:
   DOCKER_TLS_VERIFY: "1"
   DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
   DOCKER_BUILDKIT: "1"
+  # 避免构建基础镜像时直连 Docker Hub；可通过 GitLab CI/CD 变量覆盖。
+  DOCKERHUB_PREFIX: mirror.gcr.io/library
 
 docker-build:
   stage: build
@@ -34,6 +36,7 @@ docker-build:
       fi
       echo "Building with tags: $TAGS"
       docker build --pull --cache-from "$IMAGE:latest" \
+        --build-arg "DOCKERHUB_PREFIX=$DOCKERHUB_PREFIX" \
         $TAGS \
         --label "org.opencontainers.image.revision=$CI_COMMIT_SHA" \
         --label "org.opencontainers.image.source=$CI_PROJECT_URL" \
