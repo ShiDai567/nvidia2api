@@ -52,20 +52,20 @@ npm install
 npm run dev                     # http://localhost:3000
 ```
 
-默认管理密码 `admin123`，可通过 `ADMIN_PASSWORD` 环境变量修改；Docker Compose 会从 `.env` 注入。Admin API 使用 `Authorization: Bearer $ADMIN_TOKEN` 鉴权。
+默认管理密码 `admin123`，可通过 `ADMIN_PASSWORD` 环境变量修改；Docker Compose 在 `docker-compose.yml` 的 `environment` 中显式配置。Admin API 使用 `Authorization: Bearer $ADMIN_TOKEN` 鉴权。
 
 > **安全提醒**：生产部署务必修改默认口令（见「常见问题」）。
 
 ## Docker
 
 ```bash
-cp .env.example .env   # 修改 ADMIN_PASSWORD / ADMIN_TOKEN / SECRET_KEY！
+# 先修改 docker-compose.yml 中的 ADMIN_PASSWORD / ADMIN_TOKEN / SECRET_KEY！
 docker compose up -d
 ```
 
 单镜像运行前后端：仅暴露 Next.js `3000` 端口，Django 只监听容器内 `127.0.0.1:8000`，由 Next.js rewrites 将 `/api`、`/v1` 反代到后端。SQLite 数据保存在宿主 `./data`（已挂载到容器 `/app/data`），容器销毁不丢数据。容器内置健康检查（`/health`）；任一进程退出容器即重启。
 
-**注意**：`docker-compose.yml` 通过 `env_file` 加载 `.env`，所有环境变量（包括管理口令）请统一在 `.env` 中修改，不要只改 compose 文件。
+**注意**：Docker Compose 的运行环境变量已完整列在 `docker-compose.yml` 的 `environment` 中，直接修改对应值即可，无需创建 `.env` 文件。
 
 ## 使用流程
 

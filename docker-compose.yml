@@ -3,14 +3,35 @@ services:
     build: .
     ports:
       - "3000:3000"
-    # All runtime config comes from .env (cp .env.example .env and edit it).
-    # WARNING: change ADMIN_PASSWORD/ADMIN_TOKEN/SECRET_KEY before exposing
-    # this to any network; defaults are for first-boot convenience only.
-    env_file:
-      - .env
+    # 运行配置直接在此修改，无需创建 .env 文件。
+    # 生产部署前务必修改 SECRET_KEY、ADMIN_PASSWORD 和 ADMIN_TOKEN。
     environment:
-      - DATA_DIR=/app/data
-      - DATABASE_PATH=/app/data/db.sqlite3
+      SECRET_KEY: "change-me-to-a-random-string"
+      DEBUG: "false"
+      ALLOWED_HOSTS: "*"
+      TIME_ZONE: "Asia/Shanghai"
+      DATA_DIR: "/app/data"
+      DATABASE_PATH: "/app/data/db.sqlite3"
+
+      # 管理后台密码和 API 令牌
+      ADMIN_PASSWORD: "admin123"
+      ADMIN_TOKEN: "dev-admin-token"
+
+      # 上游 NVIDIA 与默认配额
+      NVIDIA_BASE_URL: "https://integrate.api.nvidia.com/v1"
+      DEFAULT_NVIDIA_RPM: "40"
+
+      # 并发、线路数与超时（秒）
+      MAX_CONCURRENT_REQUESTS: "100"
+      MAX_ROUTES_PER_REQUEST: "50"
+      DIRECT_ROUTES_PER_REQUEST: "1"
+      PROXY_TIMEOUT: "10"
+      UPSTREAM_CONNECT_TIMEOUT: "10"
+      UPSTREAM_READ_TIMEOUT: "120"
+
+      LOG_LEVEL: "INFO"
+      # 留空允许所有来源；多个来源用逗号分隔
+      CORS_ALLOWED_ORIGINS: ""
     volumes:
       - ./data:/app/data
     restart: unless-stopped

@@ -38,6 +38,7 @@ COPY --from=fe /fe/.next/static ./frontend/.next/static
 COPY --from=fe /fe/public ./frontend/public
 
 EXPOSE 3000
-# Django listens on 127.0.0.1 only; Next.js (3000) is the single entry point.
-# If Django dies, the whole container should restart (restart: unless-stopped).
-CMD ["sh", "-c", "python3 manage.py migrate && python3 -m uvicorn config.asgi:application --host 127.0.0.1 --port 8000 & BACKEND_PID=$!; cd frontend && HOSTNAME=0.0.0.0 PORT=3000 node server.js & FRONT_PID=$!; trap 'kill $BACKEND_PID $FRONT_PID 2>/dev/null' TERM INT; wait -n $BACKEND_PID $FRONT_PID; exit 1"]
+# Django 仅监听内部地址，Next.js 的 3000 端口作为统一入口。
+# Debian 的 sh 不支持 wait -n；使用 Bash 监控两个服务并转发停止信号。
+# 迁移成功后才启动服务；任一服务退出时清理另一服务并以失败状态退出。
+CMD ["bash", "-c", "python3 manage.py migrate || exit 1; python3 -m uvicorn config.asgi:application --host 127.0.0.1 --port 8000 & BACKEND_PID=$!; (cd frontend && exec env HOSTNAME=0.0.0.0 PORT=3000 node server.js) & FRONT_PID=$!; cleanup() { kill $BACKEND_PID $FRONT_PID 2>/dev/null || true; wait $BACKEND_PID $FRONT_PID 2>/dev/null || true; }; trap 'cleanup; exit 0' TERM INT; wait -n $BACKEND_PID $FRONT_PID; cleanup; exit 1"]

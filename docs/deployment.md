@@ -60,6 +60,10 @@ cd backend && uv run pytest tests
 
 ## Docker 一体化
 
+运行环境变量直接配置在 `docker-compose.yml` 的 `environment` 中，无需创建 `.env` 文件。启动前修改其中的 `SECRET_KEY`、`ADMIN_PASSWORD` 和 `ADMIN_TOKEN`；数据目录保持容器路径 `/app/data` 和 `/app/data/db.sqlite3`，通过卷挂载持久化到宿主机 `./data`。
+
+镜像使用 Bash 执行启动命令（Debian 的 `/bin/sh` 不支持 `wait -n`）。数据库迁移成功后才启动 Django 和 Next.js；任一服务退出时，启动进程会停止另一服务并以失败状态退出，交给容器重启策略恢复。收到容器停止信号时会转发给两个服务并等待它们退出。
+
 ```bash
 docker compose up -d
 ```
