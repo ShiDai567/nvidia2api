@@ -73,6 +73,12 @@ docker compose up -d
 
 Tag 流水线使用 Docker-in-Docker 构建并推送镜像，成功后创建 GitLab Release。CI 默认通过 `mirror.gcr.io/library` 拉取 Node 和 Python 官方基础镜像；`uv` 仍从 `ghcr.io/astral-sh/uv` 拉取。
 
+产物镜像直接使用 GitLab 的 `CI_REGISTRY_IMAGE`（已包含命名空间和项目名），同时推送 Git Tag 和 `latest` 标签。例如本项目的镜像地址为 `repo.elsworld.cn:8443/shidai/nvidia2api:latest`，无需再追加 `/nvidia2api`。
+
+GitLab Release 标题为 `NVIDIA2API <Git Tag>`，正文包含更新说明（优先 Tag 注解，轻量 Tag 回退到提交信息）、本版本镜像拉取命令、首次部署与升级步骤，以及后台和 API 访问地址。部署建议使用与 Git Tag 一致的镜像标签，`latest` 会随后续 Tag 发布更新。首次部署使用 Release 中的 `docker run` 命令即可，无需下载源码；仓库的 `docker-compose.yml` 使用 `build: .`，用于完整源码目录中的本地构建，不能只下载该文件就直接运行发布镜像。
+
+GitHub Release 同样提供固定版本标签（如 `ghcr.io/<组织>/<项目>:v1.2`）和独立于源码的 `docker run` 部署步骤；GitHub 的 `latest` 由默认分支构建更新。
+
 若构建在 `load metadata` 阶段报 `registry-1.docker.io ... EOF`，说明拉取基础镜像的网络连接中断，应用构建尚未开始。可在 GitLab 项目的 **Settings → CI/CD → Variables** 中设置 `DOCKERHUB_PREFIX`，覆盖为 Runner 可访问的可信缓存或私有仓库前缀（包含 `library` 路径，仓库内需提供相同镜像和标签）。直连 Docker Hub 时设为 `docker.io/library`。
 
 本地构建默认使用 Docker Hub，也可以显式指定缓存源：

@@ -3,7 +3,7 @@ stages:
   - release
 
 variables:
-  IMAGE: $CI_REGISTRY_IMAGE/nvidia2api
+  IMAGE: $CI_REGISTRY_IMAGE
   DOCKER_HOST: tcp://docker:2376
   DOCKER_TLS_CERTDIR: /certs
   DOCKER_TLS_VERIFY: "1"
@@ -49,7 +49,8 @@ docker-build:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       when: manual
 
-# Tag 触发时创建 GitLab Release。说明(description)取自该 tag 对应的内容：
+# Tag 触发时创建 GitLab Release，包含更新说明、版本镜像和部署步骤。
+# 更新说明取自该 tag 对应的内容：
 # 优先用 tag 注解消息($CI_COMMIT_TAG_MESSAGE，即 git tag -a 写的信息)，
 # 轻量 tag 无注解时回退到提交信息($CI_COMMIT_MESSAGE)。
 # 因 release-cli 的 --description 支持读取文件（release: 关键字只能传字符串），
@@ -64,15 +65,58 @@ release:
     - |
       NOTES="${CI_COMMIT_TAG_MESSAGE:-${CI_COMMIT_MESSAGE:-}}"
       cat > RELEASE_NOTES.md <<EOF
+      ## 本版本更新
+
       ${NOTES}
+
+      ## Docker 镜像
+
+      本版本镜像：\`$IMAGE:$CI_COMMIT_TAG\`。建议使用版本标签，便于确认部署版本；\`$IMAGE:latest\` 会随后续 Tag 发布更新。
+
+      \`\`\`bash
+      docker pull $IMAGE:$CI_COMMIT_TAG
+      \`\`\`
+
+      ## 首次部署（使用已构建镜像）
+
+      需要 Docker 和 curl。先创建部署目录并下载本版本的环境变量示例：
+
+      \`\`\`bash
+      mkdir -p nvidia2api
+      cd nvidia2api
+      curl --fail --location "$CI_PROJECT_URL/-/raw/$CI_COMMIT_TAG/.env.example" --output .env
+      \`\`\`
+
+      编辑 \`.env\`，将 \`ADMIN_PASSWORD\`、\`ADMIN_TOKEN\`、\`SECRET_KEY\` 改为自己的值，再启动：
+
+      \`\`\`bash
+      docker run -d --name nvidia2api \\
+        --restart unless-stopped \\
+        -p 3000:3000 \\
+        --env-file .env \\
+        -e DATA_DIR=/app/data \\
+        -e DATABASE_PATH=/app/data/db.sqlite3 \\
+        -v "\$(pwd)/data:/app/data" \\
+        $IMAGE:$CI_COMMIT_TAG
+      \`\`\`
+
+      - 管理后台：\`http://服务器地址:3000\`，使用 \`ADMIN_PASSWORD\` 登录。
+      - OpenAI 兼容 API 地址：\`http://服务器地址:3000/v1\`。在后台导入 NVIDIA Key、启用模型并创建用户 API Key 后即可调用。
+      - 数据保存在当前部署目录的 \`data/\` 中，重建容器时需继续挂载同一目录。
+
+      ## 已有部署升级
+
+      先备份部署目录的 \`data/\` 和 \`.env\`，再拉取上方的版本镜像。使用 Docker Run 部署时，停止并删除旧容器，然后在原部署目录重新执行上方启动命令；使用 Compose 部署时，将服务的 \`image\` 改为本版本镜像地址后执行 \`docker compose up -d --pull always --no-build\`。
+
+      [完整部署文档]($CI_PROJECT_URL/-/blob/$CI_COMMIT_TAG/docs/deployment.md)。下方的 Compose 配置用于从源码构建，需要完整源码；仅运行发布镜像可直接使用上方命令。
       EOF
       echo "Creating GitLab Release $CI_COMMIT_TAG (说明行数: $(wc -l < RELEASE_NOTES.md))"
     - |
       release-cli create \
-        --name "Release $CI_COMMIT_TAG" \
+        --name "NVIDIA2API $CI_COMMIT_TAG" \
         --tag-name "$CI_COMMIT_TAG" \
         --description RELEASE_NOTES.md \
-        --assets-link "{\"name\":\"Docker Compose 配置\",\"url\":\"$CI_PROJECT_URL/-/raw/$CI_COMMIT_TAG/docker-compose.yml\"}" \
+        --assets-link "{\"name\":\"源码构建用 Compose 配置\",\"url\":\"$CI_PROJECT_URL/-/raw/$CI_COMMIT_TAG/docker-compose.yml\"}" \
         --assets-link "{\"name\":\"环境变量示例\",\"url\":\"$CI_PROJECT_URL/-/raw/$CI_COMMIT_TAG/.env.example\"}"
 
 # 可选：多架构构建（需要 buildkit + builder 支持，取消注释按需使用）

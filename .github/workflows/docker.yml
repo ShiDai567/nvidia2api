@@ -45,6 +45,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=pr
+            type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=sha-
@@ -79,17 +80,39 @@ jobs:
             .env.example
             LICENSE
           body: |
-            ## nvidia2api ${{ github.ref_name }}
+            ## 本版本镜像
 
-            ### Docker 镜像
+            使用固定版本标签，便于确认部署版本；`latest` 可能随后续默认分支构建更新。
 
             ```bash
             docker pull ghcr.io/${{ github.repository }}:${{ github.ref_name }}
             ```
 
-            ### 部署
+            ## 首次部署
+
+            需要 Docker 和 curl。创建部署目录并下载本版本的环境变量示例：
 
             ```bash
-            curl -O https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/docker-compose.yml
-            docker compose up -d
+            mkdir -p nvidia2api
+            cd nvidia2api
+            curl --fail --location "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/.env.example" --output .env
             ```
+
+            编辑 `.env`，修改 `ADMIN_PASSWORD`、`ADMIN_TOKEN` 和 `SECRET_KEY`，然后启动：
+
+            ```bash
+            docker run -d --name nvidia2api \
+              --restart unless-stopped \
+              -p 3000:3000 \
+              --env-file .env \
+              -e DATA_DIR=/app/data \
+              -e DATABASE_PATH=/app/data/db.sqlite3 \
+              -v "$(pwd)/data:/app/data" \
+              ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            ```
+
+            - 管理后台：`http://服务器地址:3000`，使用 `ADMIN_PASSWORD` 登录。
+            - OpenAI 兼容 API 地址：`http://服务器地址:3000/v1`。在后台导入 NVIDIA Key、启用模型并创建用户 API Key 后即可调用。
+            - 数据保存在当前目录的 `data/` 中；升级时请备份 `.env` 和 `data/`，拉取新版本镜像并重建容器，继续挂载原数据目录。
+
+            [完整部署文档](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/deployment.md)。附带的 `docker-compose.yml` 使用 `build: .`，仅适用于完整源码目录中的本地构建，不能单独下载并用于运行发布镜像。
