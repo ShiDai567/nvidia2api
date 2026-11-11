@@ -62,7 +62,11 @@ cd backend && uv run pytest tests
 
 运行环境变量直接配置在 `docker-compose.yml` 的 `environment` 中，无需创建 `.env` 文件。启动前修改其中的 `SECRET_KEY`、`ADMIN_PASSWORD` 和 `ADMIN_TOKEN`；数据目录保持容器路径 `/app/data` 和 `/app/data/db.sqlite3`，通过卷挂载持久化到宿主机 `./data`。
 
-镜像使用 Bash 执行启动命令（Debian 的 `/bin/sh` 不支持 `wait -n`）。数据库迁移成功后才启动 Django 和 Next.js；任一服务退出时，启动进程会停止另一服务并以失败状态退出，交给容器重启策略恢复。收到容器停止信号时会转发给两个服务并等待它们退出。
+镜像通过显式 `ENTRYPOINT` 使用 `/bin/sh` 执行独立脚本 `docker/start.sh`（镜像内为 `/app/start.sh`），只使用 POSIX sh 语法，无需 `wait -n` 或 Bash。数据库迁移成功后才启动 Django 和 Next.js；脚本每秒检查服务状态，任一服务退出时会停止另一服务并以失败状态退出，交给容器重启策略恢复。收到容器停止信号时会转发给两个服务并等待它们退出。
+
+升级时删除部署配置中临时添加的 `entrypoint` 和 `command` 覆盖项，再执行 `docker compose up -d --pull always --force-recreate nvidia2api`。若日志仍显示旧的 `sh: 1: wait: Illegal option -n`，用 `docker inspect nvidia2api --format '{{json .Config.Entrypoint}} {{json .Config.Cmd}} {{.Image}}'` 核对实际容器启动配置；新入口应为 `["/bin/sh","/app/start.sh"]`。
+
+运行镜像显式安装 SQLite 动态库 `libsqlite3-0`，供从 Python 镜像复制的解释器使用。GitLab 构建后使用镜像默认入口执行启动检查：后端 `8000/health` 和前端 `3000/login` 均返回 HTTP 200、容器正常停止后，才推送版本镜像。Compose 健康检查直接访问容器内部的后端 `/health`。
 
 ```bash
 docker compose up -d

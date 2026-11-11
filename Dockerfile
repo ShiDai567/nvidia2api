@@ -19,7 +19,7 @@ FROM ${DOCKERHUB_PREFIX}/python:3.12-slim-bookworm AS python-runtime
 # Stage 3: runtime (Node for Next.js + Python for Django, same container)
 FROM ${DOCKERHUB_PREFIX}/node:22-bookworm-slim
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates libsqlite3-0 \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=python-runtime /usr/local /usr/local
@@ -36,9 +36,10 @@ COPY backend/ .
 COPY --from=fe /fe/.next/standalone ./frontend
 COPY --from=fe /fe/.next/static ./frontend/.next/static
 COPY --from=fe /fe/public ./frontend/public
+COPY --chmod=755 docker/start.sh /app/start.sh
 
 EXPOSE 3000
 # Django 仅监听内部地址，Next.js 的 3000 端口作为统一入口。
-# Debian 的 sh 不支持 wait -n；使用 Bash 监控两个服务并转发停止信号。
-# 迁移成功后才启动服务；任一服务退出时清理另一服务并以失败状态退出。
-CMD ["bash", "-c", "python3 manage.py migrate || exit 1; python3 -m uvicorn config.asgi:application --host 127.0.0.1 --port 8000 & BACKEND_PID=$!; (cd frontend && exec env HOSTNAME=0.0.0.0 PORT=3000 node server.js) & FRONT_PID=$!; cleanup() { kill $BACKEND_PID $FRONT_PID 2>/dev/null || true; wait $BACKEND_PID $FRONT_PID 2>/dev/null || true; }; trap 'cleanup; exit 0' TERM INT; wait -n $BACKEND_PID $FRONT_PID; cleanup; exit 1"]
+# 显式入口覆盖 Node 基础镜像入口，避免继承命令影响进程管理。
+ENTRYPOINT ["/bin/sh", "/app/start.sh"]
+CMD []

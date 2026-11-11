@@ -41,6 +41,8 @@ docker-build:
         --label "org.opencontainers.image.revision=$CI_COMMIT_SHA" \
         --label "org.opencontainers.image.source=$CI_PROJECT_URL" \
         .
+      # 默认入口必须能实际启动服务；检查通过后才推送版本镜像。
+      sh docker/smoke-test.sh "$IMAGE:${CI_COMMIT_TAG:-$CI_COMMIT_SHORT_SHA}"
       docker push --all-tags "$IMAGE"
   rules:
     # 仅在打 Tag 时自动构建镜像
@@ -110,14 +112,22 @@ release:
 
       [完整部署文档]($CI_PROJECT_URL/-/blob/$CI_COMMIT_TAG/docs/deployment.md)。下方的 Compose 配置用于从源码构建，需要完整源码；仅运行发布镜像可直接使用上方命令。
       EOF
-      echo "Creating GitLab Release $CI_COMMIT_TAG (说明行数: $(wc -l < RELEASE_NOTES.md))"
+      echo "Publishing GitLab Release $CI_COMMIT_TAG (说明行数: $(wc -l < RELEASE_NOTES.md))"
     - |
-      release-cli create \
-        --name "NVIDIA2API $CI_COMMIT_TAG" \
-        --tag-name "$CI_COMMIT_TAG" \
-        --description RELEASE_NOTES.md \
-        --assets-link "{\"name\":\"源码构建用 Compose 配置\",\"url\":\"$CI_PROJECT_URL/-/raw/$CI_COMMIT_TAG/docker-compose.yml\"}" \
-        --assets-link "{\"name\":\"环境变量示例\",\"url\":\"$CI_PROJECT_URL/-/raw/$CI_COMMIT_TAG/.env.example\"}"
+      # 重发已有标签时更新说明，保留原 Release 和下载链接。
+      if release-cli get --tag-name "$CI_COMMIT_TAG" >/dev/null 2>&1; then
+        release-cli update \
+          --name "NVIDIA2API $CI_COMMIT_TAG" \
+          --tag-name "$CI_COMMIT_TAG" \
+          --description RELEASE_NOTES.md
+      else
+        release-cli create \
+          --name "NVIDIA2API $CI_COMMIT_TAG" \
+          --tag-name "$CI_COMMIT_TAG" \
+          --description RELEASE_NOTES.md \
+          --assets-link "{\"name\":\"源码构建用 Compose 配置\",\"url\":\"$CI_PROJECT_URL/-/raw/$CI_COMMIT_TAG/docker-compose.yml\"}" \
+          --assets-link "{\"name\":\"环境变量示例\",\"url\":\"$CI_PROJECT_URL/-/raw/$CI_COMMIT_TAG/.env.example\"}"
+      fi
 
 # 可选：多架构构建（需要 buildkit + builder 支持，取消注释按需使用）
 # docker-build-multiarch:

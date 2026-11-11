@@ -1,4 +1,4 @@
-"""用替身进程验证镜像实际启动命令的迁移、退出与信号处理。"""
+"""用替身进程验证容器启动脚本的迁移、退出与信号处理。"""
 
 import json
 import os
@@ -14,11 +14,16 @@ import pytest
 @pytest.mark.parametrize("scenario", ["migration", "backend", "frontend", "terminate"])
 def test_container_startup(tmp_path, scenario):
     root = Path(__file__).resolve().parents[2]
-    command = next(
-        line.removeprefix("CMD ")
+    entrypoint = next(
+        line.removeprefix("ENTRYPOINT ")
         for line in (root / "Dockerfile").read_text().splitlines()
-        if line.startswith("CMD ")
+        if line.startswith("ENTRYPOINT ")
     )
+    command = json.loads(entrypoint)
+    assert command == ["/bin/sh", "/app/start.sh"]
+    script = tmp_path / "start.sh"
+    script.write_bytes((root / "docker/start.sh").read_bytes())
+    command[1] = str(script)
     (tmp_path / "frontend").mkdir()
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -44,7 +49,7 @@ time.sleep(60)
         executable.chmod(0o755)
 
     process = subprocess.Popen(
-        json.loads(command),
+        command,
         cwd=tmp_path,
         env={
             **os.environ,
