@@ -29,6 +29,7 @@
 
 - **非流式**：竞速在返回前完成——直接返回 NVIDIA 原始 JSON，或对应的错误状态码。
 - **流式**：竞速同样在返回前完成。所有线路失败时返回真实的 502/503 + OpenAI 风格 JSON 错误（**不会**返回 200 后在流里塞错误）；有 Winner 时返回 `200 + text/event-stream`，上游 chunk 透传，结尾 `data: [DONE]`。
+- ASGI 部署（包括 Docker 内的 Uvicorn）使用异步响应迭代器逐段发送 SSE，首段内容在上游生成结束前即可到达客户端。
 - 响应头 `X-Request-Id` 可用于在请求日志页定位记录。
 - 平台自动注入 `stream_options.include_usage` 以记录 token 用量（对用户透明）。
 

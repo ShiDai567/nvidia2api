@@ -271,7 +271,22 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key):
         log.cached_tokens = (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0) or 0
         log.save()
 
-    response = StreamingHttpResponse(gen(), content_type="text/event-stream")
+    # ASGI 会完整消费同步迭代器后再发送，需逐次异步读取以保留流式输出。
+    async def async_gen():
+        from asgiref.sync import sync_to_async
+
+        iterator = gen()
+        end = object()
+        try:
+            while True:
+                item = await sync_to_async(next, thread_sensitive=True)(iterator, end)
+                if item is end:
+                    break
+                yield item
+        finally:
+            await sync_to_async(iterator.close, thread_sensitive=True)()
+
+    response = StreamingHttpResponse(async_gen(), content_type="text/event-stream")
     # /v1 同样经过 Next.js 反代，避免 gzip 将流式分片缓冲到结束。
     response["Cache-Control"] = "no-cache, no-transform"
     response["X-Accel-Buffering"] = "no"

@@ -22,6 +22,17 @@ def _auth_header(raw):
     return {"HTTP_AUTHORIZATION": f"Bearer {raw}"}
 
 
+def _streaming_body(response):
+    if response.is_async:
+        from asgiref.sync import async_to_sync
+
+        async def collect():
+            return b"".join([chunk async for chunk in response.streaming_content])
+
+        return async_to_sync(collect)().decode()
+    return b"".join(response.streaming_content).decode()
+
+
 class ChatViewValidationTests(TestCase):
     def setUp(self):
         self.rec, self.raw = _make_user_key()
@@ -142,7 +153,7 @@ class StreamingStatusTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp["Content-Type"], "text/event-stream")
         self.assertIn("no-transform", resp["Cache-Control"])
-        body = b"".join(resp.streaming_content).decode()
+        body = _streaming_body(resp)
         self.assertIn('"content":"A"', body)
         self.assertIn("data: [DONE]", body)
 
@@ -184,9 +195,78 @@ class StreamingStatusTests(TestCase):
             self.assertEqual(len(scheduled), 1)
             self.assertEqual(resp["Content-Type"], "text/event-stream")
 
-        body = b"".join(resp.streaming_content).decode()
+        body = _streaming_body(resp)
         self.assertIn('"content":"A"', body)
         self.assertIn("data: [DONE]", body)
+
+
+class OpenAIStreamingASGITests(TransactionTestCase):
+    def test_content_reaches_client_before_upstream_completes(self):
+        """公开 OpenAI 接口在 ASGI 下必须逐段发送 SSE。"""
+        import asyncio
+        from concurrent.futures import Future
+        from types import SimpleNamespace
+
+        from asgiref.sync import async_to_sync
+        from asgiref.testing import ApplicationCommunicator
+        from django.test import AsyncRequestFactory
+
+        from config.asgi import application
+
+        _, raw = _make_user_key()
+        AIModel.objects.create(model_name="m/test", enabled=True)
+        key = NvidiaApiKey.objects.create(name="k1", api_key="nvapi-k1")
+        release = Future()
+
+        async def lines():
+            yield 'data: {"choices":[{"delta":{"content":"首段"}}]}\n\n'
+            await asyncio.wrap_future(release)
+            yield "data: [DONE]\n\n"
+
+        async def close():
+            pass
+
+        async def race(*args):
+            return SimpleNamespace(
+                route=SimpleNamespace(kind="direct", key=key, proxy=None),
+                report=[], lines=lines, close=close,
+            )
+
+        request = AsyncRequestFactory().post(
+            "/v1/chat/completions",
+            data=json.dumps({"model": "m/test", "stream": True,
+                             "messages": [{"role": "user", "content": "hi"}]}),
+            content_type="application/json",
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+
+        async def check():
+            communicator = ApplicationCommunicator(application, request.scope)
+            await communicator.send_input({"type": "http.request", "body": request.body})
+            try:
+                start = await communicator.receive_output(timeout=2)
+                self.assertEqual(start["status"], 200)
+                body = b""
+                while "首段".encode() not in body:
+                    event = await communicator.receive_output(timeout=2)
+                    self.assertEqual(event["type"], "http.response.body")
+                    body += event.get("body", b"")
+                self.assertFalse(release.done())
+                release.set_result(None)
+                while True:
+                    event = await communicator.receive_output(timeout=2)
+                    body += event.get("body", b"")
+                    if not event.get("more_body", False):
+                        break
+                self.assertIn(b"data: [DONE]", body)
+                await communicator.wait(timeout=2)
+            finally:
+                if not release.done():
+                    release.set_result(None)
+                communicator.stop()
+
+        with patch("services.race_engine.race_stream", side_effect=race):
+            async_to_sync(check)()
 
 
 class NonStreamingViewTests(TestCase):
