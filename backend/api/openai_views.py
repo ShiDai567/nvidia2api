@@ -5,6 +5,7 @@ import json
 import logging
 import threading
 import time
+from concurrent.futures import Future
 
 from django.conf import settings
 from django.http import JsonResponse, StreamingHttpResponse
@@ -136,7 +137,7 @@ def chat_completions(request):
 
         if stream:
             return _stream_response(routes, upstream_body, log, started,
-                                    request_id, user_key)
+                                    request_id, user_key, is_asgi=hasattr(request, "scope"))
 
         try:
             result = race_chat(routes, upstream_body, settings.NVIDIA_BASE_URL)
@@ -168,22 +169,21 @@ def _with_request_id(resp, request_id: str):
     return resp
 
 
-def _stream_response(routes, upstream_body, log, started, request_id, user_key):
+def _stream_response(routes, upstream_body, log, started, request_id, user_key, *, is_asgi=True):
     """Streaming with correct HTTP semantics: the race is resolved BEFORE the
     response object is returned, so callers get a real status code:
     502/503 with an OpenAI-style JSON error when every route fails, and 200 +
     SSE only when a winner exists.
 
-    While streaming, the shared loop pumps chunks into a thread-safe queue;
-    the Django generator drains it without blocking the event loop (no
-    per-chunk run_until_complete).
+    The upstream pump runs on the shared loop; an async queue bridges to the
+    ASGI response loop with bounded capacity, preserving backpressure.
     """
-    import queue as _queue
+    import asyncio
 
     from services.race_engine import race_stream
 
-    q: _queue.Queue = _queue.Queue()
     SENTINEL = object()
+    queue_ready: Future = Future()
 
     # Ask upstream to include usage in the final chunk so tokens can be logged.
     upstream_body = dict(upstream_body)
@@ -223,47 +223,7 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key):
     log.save()
     api_key_service.record_result(user_key, True)
 
-    async def _pump():
-        usage: dict = {}
-        try:
-            async for chunk in w.lines():
-                try:
-                    if chunk.startswith("data:"):
-                        payload = json.loads(chunk[5:].strip())
-                        if isinstance(payload, dict) and payload.get("usage"):
-                            usage = payload["usage"]
-                except Exception:  # noqa: BLE001
-                    pass
-                q.put(chunk)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("stream pump failed")
-            q.put(SENTINEL)
-            q.put(exc)
-            return
-        finally:
-            await w.close()
-        q.put(SENTINEL)
-        q.put(usage)
-
-    submit_coroutine(_pump())  # schedule the pump; do NOT block on it
-
-    def gen():
-        usage: dict = {}
-        while True:
-            item = q.get()
-            if item is SENTINEL:
-                nxt = q.get()
-                if isinstance(nxt, Exception):
-                    _finish_log(log, started, False, 502, "stream_error")
-                    yield "data: " + json.dumps({
-                        "error": {"message": f"stream error: {nxt}", "type": "api_error",
-                                  "param": None, "code": "stream_error"}
-                    }) + "\n\n"
-                    yield "data: [DONE]\n\n"
-                    return
-                usage = nxt or {}
-                break
-            yield item
+    def save_usage(usage):
         log.duration_ms = round((time.monotonic() - started) * 1000, 1)
         log.prompt_tokens = usage.get("prompt_tokens", 0) or 0
         log.completion_tokens = usage.get("completion_tokens", 0) or 0
@@ -271,22 +231,96 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key):
         log.cached_tokens = (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0) or 0
         log.save()
 
-    # ASGI 会完整消费同步迭代器后再发送，需逐次异步读取以保留流式输出。
+    def extract_usage(chunk, usage):
+        try:
+            if chunk.startswith("data:"):
+                payload = json.loads(chunk[5:].strip())
+                if isinstance(payload, dict) and payload.get("usage"):
+                    return payload["usage"]
+        except (ValueError, TypeError):
+            pass
+        return usage
+
+    def error_chunk(exc):
+        return "data: " + json.dumps({
+            "error": {"message": f"stream error: {exc}", "type": "api_error",
+                      "param": None, "code": "stream_error"}
+        }) + "\n\n"
+
+    def sync_gen():
+        usage = {}
+        iterator = w.lines().__aiter__()
+
+        async def next_chunk():
+            return await anext(iterator, SENTINEL)
+
+        try:
+            while True:
+                chunk = run_coroutine(next_chunk())
+                if chunk is SENTINEL:
+                    break
+                usage = extract_usage(chunk, usage)
+                yield chunk
+            save_usage(usage)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("stream pump failed")
+            _finish_log(log, started, False, 502, "stream_error")
+            yield error_chunk(exc)
+            yield "data: [DONE]\n\n"
+        finally:
+            run_coroutine(w.close())
+
+    async def _send(response_queue, response_loop, item):
+        pending = asyncio.run_coroutine_threadsafe(response_queue.put(item), response_loop)
+        await asyncio.wrap_future(pending)
+
+    async def _pump():
+        usage: dict = {}
+        response_queue, response_loop = await asyncio.wrap_future(queue_ready)
+        try:
+            async for chunk in w.lines():
+                usage = extract_usage(chunk, usage)
+                await _send(response_queue, response_loop, chunk)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("stream pump failed")
+            await _send(response_queue, response_loop, SENTINEL)
+            await _send(response_queue, response_loop, exc)
+            return
+        finally:
+            await w.close()
+        await _send(response_queue, response_loop, SENTINEL)
+        await _send(response_queue, response_loop, usage)
+
     async def async_gen():
         from asgiref.sync import sync_to_async
 
-        iterator = gen()
-        end = object()
+        usage: dict = {}
+        response_queue = asyncio.Queue(maxsize=1)
+        pump_task = submit_coroutine(_pump())
+        queue_ready.set_result((response_queue, asyncio.get_running_loop()))
         try:
             while True:
-                item = await sync_to_async(next, thread_sensitive=True)(iterator, end)
-                if item is end:
+                item = await response_queue.get()
+                if item is SENTINEL:
+                    nxt = await response_queue.get()
+                    if isinstance(nxt, Exception):
+                        await sync_to_async(_finish_log, thread_sensitive=True)(
+                            log, started, False, 502, "stream_error"
+                        )
+                        yield error_chunk(nxt)
+                        yield "data: [DONE]\n\n"
+                        return
+                    usage = nxt or {}
                     break
                 yield item
+            await sync_to_async(save_usage, thread_sensitive=True)(usage)
         finally:
-            await sync_to_async(iterator.close, thread_sensitive=True)()
+            if not pump_task.done():
+                pump_task.cancel()
 
-    response = StreamingHttpResponse(async_gen(), content_type="text/event-stream")
+    response = StreamingHttpResponse(
+        async_gen() if is_asgi else sync_gen(), content_type="text/event-stream"
+    )
     # /v1 同样经过 Next.js 反代，避免 gzip 将流式分片缓冲到结束。
     response["Cache-Control"] = "no-cache, no-transform"
     response["X-Accel-Buffering"] = "no"

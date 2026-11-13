@@ -157,13 +157,8 @@ class StreamingStatusTests(TestCase):
         self.assertIn('"content":"A"', body)
         self.assertIn("data: [DONE]", body)
 
-    def test_stream_pump_uses_non_blocking_submit(self):
-        """Regression: the pump must be fire-and-forget via ``submit_coroutine``.
-
-        Blocking on it (``run_coroutine``) drains the whole upstream stream into
-        the queue before the view returns, so every SSE chunk reaches the client
-        at once instead of incrementally.
-        """
+    def test_wsgi_stream_uses_sync_iterator(self):
+        """WSGI 必须使用同步迭代器，避免 Django 在发送前收集完整响应。"""
         async def fake_lines(self):
             yield 'data: {"choices":[{"delta":{"content":"A"}}]}\n\n'
             yield "data: [DONE]\n\n"
@@ -180,19 +175,10 @@ class StreamingStatusTests(TestCase):
             w.lines = fake_lines.__get__(w)  # type: ignore[method-assign]
             return w
 
-        scheduled = []
-        import services.loop as loop_mod
-
-        def spy(coro):
-            scheduled.append(coro)
-            return loop_mod.submit_coroutine(coro)
-
-        with patch("services.race_engine.race_stream", fake_race_stream), \
-             patch("api.openai_views.submit_coroutine", spy, create=True):
+        with patch("services.race_engine.race_stream", fake_race_stream):
             resp = self._post_stream()
             self.assertEqual(resp.status_code, 200)
-            # The view scheduled the pump without awaiting it.
-            self.assertEqual(len(scheduled), 1)
+            self.assertFalse(resp.is_async)
             self.assertEqual(resp["Content-Type"], "text/event-stream")
 
         body = _streaming_body(resp)
@@ -201,6 +187,57 @@ class StreamingStatusTests(TestCase):
 
 
 class OpenAIStreamingASGITests(TransactionTestCase):
+    def test_stream_uses_backpressure_between_upstream_chunks(self):
+        """消费端收到首段之前，不应提前拉取后续上游数据。"""
+        import asyncio
+        from concurrent.futures import Future
+        from types import SimpleNamespace
+
+        from asgiref.sync import async_to_sync
+        from api.openai_views import _stream_response
+
+        key = NvidiaApiKey(name="k1", api_key="nvapi-k1")
+        second_chunk_requested = Future()
+        release_second_chunk = Future()
+
+        async def lines():
+            yield 'data: {"choices":[{"delta":{"content":"首段"}}]}\n\n'
+            second_chunk_requested.set_result(True)
+            await asyncio.wrap_future(release_second_chunk)
+            yield 'data: {"choices":[{"delta":{"content":"次段"}}]}\n\n'
+            yield "data: [DONE]\n\n"
+
+        async def close():
+            pass
+
+        winner = SimpleNamespace(
+            route=SimpleNamespace(kind="direct", key=key, proxy=None),
+            report=[], lines=lines, close=close,
+        )
+        log = SimpleNamespace(
+            winner_route_type="", winner_key_name="", winner_proxy_name="",
+            proxy_public_ip="", status="", http_status=0, first_token_ms=0,
+            routes=[], duration_ms=0, prompt_tokens=0, completion_tokens=0,
+            total_tokens=0, cached_tokens=0, save=lambda: None,
+        )
+        async def consume_one():
+            iterator = response.streaming_content
+            first = await anext(iterator)
+            self.assertIn("首段", first.decode())
+            await asyncio.wrap_future(second_chunk_requested)
+            self.assertFalse(release_second_chunk.done())
+            release_second_chunk.set_result(None)
+            await iterator.aclose()
+
+        def return_winner(coro):
+            coro.close()
+            return winner
+
+        with patch("api.openai_views.run_coroutine", side_effect=return_winner), \
+             patch("api.openai_views.api_key_service.record_result"):
+            response = _stream_response([], {}, log, 0, "req_test", SimpleNamespace())
+            async_to_sync(consume_one)()
+
     def test_content_reaches_client_before_upstream_completes(self):
         """公开 OpenAI 接口在 ASGI 下必须逐段发送 SSE。"""
         import asyncio
@@ -267,6 +304,52 @@ class OpenAIStreamingASGITests(TransactionTestCase):
 
         with patch("services.race_engine.race_stream", side_effect=race):
             async_to_sync(check)()
+
+
+class OpenAIStreamingWSGITests(TransactionTestCase):
+    def test_first_chunk_arrives_before_upstream_finishes(self):
+        import asyncio
+        from concurrent.futures import Future, ThreadPoolExecutor
+        from types import SimpleNamespace
+
+        from django.test import Client
+
+        _, raw = _make_user_key()
+        AIModel.objects.create(model_name="m/test", enabled=True)
+        key = NvidiaApiKey.objects.create(name="k1", api_key="nvapi-k1")
+        release = Future()
+
+        async def lines():
+            yield 'data: {"choices":[{"delta":{"content":"first"}}]}\n\n'
+            await asyncio.wrap_future(release)
+            yield "data: [DONE]\n\n"
+
+        async def close():
+            pass
+
+        async def race(*args):
+            return SimpleNamespace(
+                route=SimpleNamespace(kind="direct", key=key, proxy=None),
+                report=[], lines=lines, close=close,
+            )
+
+        with patch("services.race_engine.race_stream", side_effect=race):
+            response = Client().post(
+                "/v1/chat/completions",
+                data=json.dumps({"model": "m/test", "stream": True,
+                                 "messages": [{"role": "user", "content": "hi"}]}),
+                content_type="application/json", **_auth_header(raw),
+            )
+            iterator = iter(response.streaming_content)
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                first = executor.submit(next, iterator)
+                try:
+                    self.assertIn(b'"content":"first"', first.result(timeout=2))
+                    self.assertFalse(release.done())
+                finally:
+                    if not release.done():
+                        release.set_result(None)
+                self.assertIn(b"data: [DONE]", b"".join(iterator))
 
 
 class NonStreamingViewTests(TestCase):
