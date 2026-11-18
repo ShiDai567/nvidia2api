@@ -100,6 +100,8 @@ class AIModel(Timestamped):
     provider = models.CharField(max_length=64, default="nvidia")
     status = models.CharField(max_length=16, default="active")
     enabled = models.BooleanField(default=False, db_index=True)
+    test_latency_ms = models.FloatField(null=True, blank=True)
+    last_tested_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "model"

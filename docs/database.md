@@ -34,7 +34,7 @@ Proxy 字段：`protocol`(`socks5|socks5h|http|https`)、`host`、`port`、`user
 
 ### model
 
-`model_name` UNIQUE、`display_name`、`description`、`provider`、`status`、`enabled`（有索引，`enabled + model_name` 复合索引）。只有 `enabled=true` 的模型通过 `/v1/models` 暴露。
+`model_name` UNIQUE、`display_name`、`description`、`provider`、`status`、`enabled`（有索引，`enabled + model_name` 复合索引）、`test_latency_ms`（最近一次成功测试耗时）、`last_tested_at`（最近一次成功测试时间）。只有 `enabled=true` 的模型通过 `/v1/models` 暴露。
 
 ### user_api_key
 

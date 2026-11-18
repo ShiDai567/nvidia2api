@@ -39,6 +39,7 @@ urlpatterns = [
 
     path("api/admin/models", admin_views.ModelListView.as_view()),
     path("api/admin/models/sync", admin_views.ModelSyncView.as_view()),
+    path("api/admin/models/retired/delete", admin_views.RetiredModelBulkDeleteView.as_view()),
     path("api/admin/models/<int:pk>", admin_views.ModelDetailView.as_view()),
 
     path("api/admin/api-keys", admin_views.UserApiKeyListView.as_view()),

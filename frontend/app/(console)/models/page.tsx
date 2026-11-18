@@ -1,8 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Download, Pencil, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
-import { api, asList, Model, ModelSyncResult } from "@/lib/api";
+import {
+  AlertTriangle,
+  Download,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  Search,
+  Trash2,
+} from "lucide-react";
+import { api, asList, AdminChatResponse, Model, ModelSyncResult } from "@/lib/api";
 import {
   Badge,
   Button,
@@ -30,6 +39,8 @@ export default function ModelsPage() {
   const [error, setError] = useState("");
   const [edit, setEdit] = useState<Partial<Model> | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [testingId, setTestingId] = useState<number | null>(null);
+  const [deletingRetired, setDeletingRetired] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -98,6 +109,50 @@ export default function ModelsPage() {
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "删除失败");
+    }
+  }
+
+  async function removeRetired() {
+    const count = retiredModels.length;
+    if (!count || !confirm(`确认一键删除全部 ${count} 个官方已下架模型？此操作不可恢复。`)) return;
+    setDeletingRetired(true);
+    try {
+      const result = await api.post<{ deleted: number }>("/api/admin/models/retired/delete", {});
+      toast.success(`已删除 ${result.deleted} 个下架模型`);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "删除下架模型失败");
+    } finally {
+      setDeletingRetired(false);
+    }
+  }
+
+  async function testModel(m: Model) {
+    setTestingId(m.id);
+    try {
+      const result = await api.post<AdminChatResponse>("/api/admin/chat", {
+        model: m.model_name,
+        prompt: "hi",
+        max_tokens: 32,
+      });
+      const latency = result.meta?.duration_ms;
+      if (typeof latency === "number") {
+        setModels((current) =>
+          current.map((item) =>
+            item.id === m.id
+              ? { ...item, test_latency_ms: latency, last_tested_at: new Date().toISOString() }
+              : item,
+          ),
+        );
+      }
+      const reply = result.payload?.choices?.[0]?.message?.content?.trim();
+      toast.success(
+        `测试成功${reply ? `：${reply}` : ""}${typeof latency === "number" ? `（${latency} ms）` : ""}`,
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "模型测试失败");
+    } finally {
+      setTestingId(null);
     }
   }
 
@@ -214,14 +269,24 @@ export default function ModelsPage() {
               已下架模型不可启用；重新同步确认官方恢复后，可手动启用。
             </p>
           </div>
-          <Button
-            onClick={() => {
-              setStatusFilter("retired");
-              setQ("");
-            }}
-          >
-            查看下架模型
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              onClick={() => {
+                setStatusFilter("retired");
+                setQ("");
+              }}
+            >
+              查看下架模型
+            </Button>
+            <Button
+              variant="danger"
+              loading={deletingRetired}
+              disabled={loading || syncing}
+              onClick={removeRetired}
+            >
+              一键删除下架模型
+            </Button>
+          </div>
         </div>
       )}
 
@@ -265,9 +330,9 @@ export default function ModelsPage() {
           <>
             <Th>模型名称</Th>
             <Th>显示名称</Th>
-            <Th>Provider</Th>
             <Th>状态</Th>
             <Th>启用</Th>
+            <Th>延迟</Th>
             <Th>更新时间</Th>
             <Th>操作</Th>
           </>
@@ -277,7 +342,6 @@ export default function ModelsPage() {
           <tr key={m.id} className="hover:bg-white/[0.02]">
             <Td className="font-mono text-xs text-gray-200">{m.model_name}</Td>
             <Td className="text-gray-400">{m.display_name || "—"}</Td>
-            <Td className="text-gray-400">{m.provider || "nvidia"}</Td>
             <Td>
               {m.status === "retired" ? (
                 <Badge status="retired" />
@@ -295,9 +359,21 @@ export default function ModelsPage() {
                 onChange={(v) => setEnabled(m, v)}
               />
             </Td>
+            <Td className="text-xs text-gray-400">
+              {m.test_latency_ms != null ? `${m.test_latency_ms} ms` : "—"}
+            </Td>
             <Td className="text-xs text-gray-500">{fmtTime(m.updated_at)}</Td>
             <Td>
               <div className="flex items-center gap-1">
+                <button
+                  aria-label={`测试模型 ${m.model_name}`}
+                  title="发送 hi 测试模型"
+                  disabled={testingId !== null || syncing || loading}
+                  onClick={() => testModel(m)}
+                  className="rounded p-1.5 text-gray-500 hover:bg-emerald-500/15 hover:text-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Play size={14} />
+                </button>
                 <button
                   aria-label={`编辑模型 ${m.model_name}`}
                   onClick={() => setEdit(m)}

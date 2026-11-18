@@ -59,7 +59,8 @@ class ModelSerializer(serializers.ModelSerializer):
     class Meta:
         model = AIModel
         fields = ["id", "model_name", "display_name", "description", "provider",
-                  "status", "enabled", "created_at", "updated_at"]
+                  "status", "enabled", "test_latency_ms", "last_tested_at",
+                  "created_at", "updated_at"]
 
 
 class UserApiKeySerializer(serializers.ModelSerializer):

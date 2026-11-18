@@ -143,6 +143,8 @@ export interface Model {
   provider?: string;
   status?: string;
   enabled: boolean;
+  test_latency_ms?: number | null;
+  last_tested_at?: string | null;
   created_at: string;
   updated_at: string;
 }

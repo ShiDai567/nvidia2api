@@ -407,6 +407,55 @@ class AdminChatViewTests(TestCase):
         AIModel.objects.create(model_name="m/test", enabled=True)
         NvidiaApiKey.objects.create(name="k1", api_key="nvapi-k1")
 
+    def test_disabled_model_can_be_tested(self):
+        from django.test import Client
+
+        model = AIModel.objects.get(model_name="m/test")
+        model.enabled = False
+        model.save(update_fields=["enabled", "updated_at"])
+
+        with patch("services.load_balancer.build_routes", return_value=[]):
+            response = Client().post(
+                "/api/admin/chat",
+                data=json.dumps({
+                    "model": "m/test",
+                    "prompt": "hi",
+                }),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Token {self.admin_token}",
+            )
+
+        # 模型存在性校验通过；请求因没有可用线路失败，而非模型未启用。
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["error"]["code"], "no_available_route")
+
+    def test_successful_test_persists_model_latency(self):
+        from types import SimpleNamespace
+        from django.test import Client
+        from services.race_engine import RaceResult
+
+        result = RaceResult(
+            ok=True,
+            route=SimpleNamespace(
+                kind="direct", key=SimpleNamespace(name="k1"), proxy=None,
+            ),
+            payload={"choices": [{"message": {"content": "hello"}}]},
+            report=[],
+        )
+        with patch("services.load_balancer.build_routes", return_value=[object()]), \
+             patch("services.race_engine.race_chat", return_value=result):
+            response = Client().post(
+                "/api/admin/chat",
+                data=json.dumps({"model": "m/test", "prompt": "hi"}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Token {self.admin_token}",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        model = AIModel.objects.get(model_name="m/test")
+        self.assertIsNotNone(model.test_latency_ms)
+        self.assertIsNotNone(model.last_tested_at)
+
     def test_stream_failure_is_forwarded_as_sse_error(self):
         from django.test import Client
         from services.race_engine import AllRoutesFailed
@@ -617,6 +666,22 @@ class LoginSecurityTests(TestCase):
         )
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.json()["error"]["code"], "model_retired")
+
+    def test_bulk_delete_removes_only_retired_models(self):
+        from django.conf import settings
+        from django.test import Client
+
+        retired = AIModel.objects.create(model_name="a/removed", status="retired")
+        active = AIModel.objects.create(model_name="a/current", status="active")
+        resp = Client().post(
+            "/api/admin/models/retired/delete", data="{}", content_type="application/json",
+            HTTP_AUTHORIZATION=f"Token {settings.ADMIN_TOKEN}",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["deleted"], 1)
+        self.assertFalse(AIModel.objects.filter(pk=retired.pk).exists())
+        self.assertTrue(AIModel.objects.filter(pk=active.pk).exists())
 
     def test_login_lockout_after_failures(self):
         from django.test import Client

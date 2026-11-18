@@ -320,6 +320,14 @@ class ModelSyncView(AdminRequiredMixin, APIView):
             )
 
 
+class RetiredModelBulkDeleteView(AdminRequiredMixin, APIView):
+    """Delete all models that are no longer present in the NVIDIA catalog."""
+
+    def post(self, request):
+        deleted, _ = AIModel.objects.filter(status="retired").delete()
+        return Response({"deleted": deleted})
+
+
 class ModelDetailView(AdminRequiredMixin, APIView):
     def _get(self, pk):
         try:
@@ -562,9 +570,9 @@ class AdminChatView(AdminRequiredMixin, APIView):
         if not model or not messages:
             return Response({"error": {"message": "model and prompt/messages required",
                                        "code": "bad_request"}}, status=400)
-        if not AIModel.objects.filter(model_name=model, enabled=True).exists():
-            return Response({"error": {"message": f"模型 {model} 不存在或未启用",
-                                       "code": "model_not_found"}}, status=404)
+        if not AIModel.objects.filter(model_name=model).exists():
+            return Response({"error": {"message": f"模型 {model} 不存在",
+                                        "code": "model_not_found"}}, status=404)
 
         body = {k: v for k, v in request.data.items() if k in self.ALLOWED and v is not None}
         body["model"] = model
@@ -616,6 +624,9 @@ class AdminChatView(AdminRequiredMixin, APIView):
         log.cached_tokens = (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0) or 0
         log.routes = result.report or []
         log.save()
+        AIModel.objects.filter(model_name=model).update(
+            test_latency_ms=duration, last_tested_at=timezone.now()
+        )
         return Response({
             "request_id": request_id,
             "payload": result.payload,

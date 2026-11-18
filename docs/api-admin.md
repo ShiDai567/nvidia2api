@@ -72,11 +72,12 @@ import 返回 `{success, duplicate, invalid, failed, errors[]}`。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/admin/models?q=` | 列表 |
+| GET | `/api/admin/models?q=` | 列表，含最近一次成功测试的 `test_latency_ms` 和 `last_tested_at` |
 | POST | `/api/admin/models` | 新建 |
 | PATCH | `/api/admin/models/{id}` | `display_name`/`description`/`enabled`；官方已下架模型不能启用（400 `model_retired`） |
 | DELETE | `/api/admin/models/{id}` | 删除 |
 | POST | `/api/admin/models/sync` | 从 NVIDIA 拉 `/v1/models` 并 upsert；同步结果含 `retired_models`、原已启用的 `conflicts`、`restored_models` 明细。官方下架模型软下架并禁用；官方恢复后仅清除下架标记，不自动启用 |
+| POST | `/api/admin/chat` | 测试模型成功后将耗时写入模型记录；模型下架/禁用状态不影响管理员测试 |
 
 ## 用户 API Key
 
