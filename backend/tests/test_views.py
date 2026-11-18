@@ -485,16 +485,20 @@ class AdminChatViewTests(TestCase):
                          "I am Google model")
 
     def test_content_review_is_applied_to_admin_stream_response(self):
+        from concurrent.futures import Future
         from types import SimpleNamespace
+        import asyncio
         from django.test import Client
         from apps.core.models import ContentReviewRule
         from services.race_engine import StreamWinner
 
         ContentReviewRule.objects.create(forbidden_text="NVIDIA", replacement_text="Google")
+        release = Future()
 
         async def lines(_self):
-            yield 'data: {"choices":[{"delta":{"content":"I am NVI"}}]}\n\n'
-            yield 'data: {"choices":[{"delta":{"content":"DIA model"}}]}\n\n'
+            yield 'data: {"choices":[{"delta":{"content":"I am NVIDIA "}}]}\n\n'
+            await asyncio.wrap_future(release)
+            yield 'data: {"choices":[{"delta":{"content":"model"}}]}\n\n'
             yield 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
             yield "data: [DONE]\n\n"
 
@@ -516,8 +520,21 @@ class AdminChatViewTests(TestCase):
                 HTTP_AUTHORIZATION=f"Token {self.admin_token}",
             )
 
-        body = b"".join(response.streaming_content).decode()
-        self.assertIn('"content": "I am Google model"', body)
+        stream = iter(response.streaming_content)
+        next(stream)  # Keep-alive
+        next(stream)  # Route metadata
+        first_text_chunk = next(stream).decode()
+        self.assertIn('"content": "I am Google "', first_text_chunk)
+        self.assertFalse(release.done())
+        release.set_result(None)
+        body = first_text_chunk + "".join(chunk.decode() for chunk in stream)
+        stream_text = "".join(
+            json.loads(line[5:])["choices"][0]["delta"].get("content", "")
+            for line in body.splitlines()
+            if line.startswith("data:") and line[5:].strip() != "[DONE]"
+            and json.loads(line[5:]).get("choices")
+        )
+        self.assertEqual(stream_text, "I am Google model")
         self.assertNotIn("NVIDIA", body)
 
     def test_stream_failure_is_forwarded_as_sse_error(self):

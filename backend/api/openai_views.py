@@ -13,7 +13,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from apps.core.models import AIModel, RequestLog
 from services import api_key_service, key_service
-from services.content_review import review_payload, review_text
+from services.content_review import StreamContentReviewer, review_payload, review_text
 from services.load_balancer import build_routes
 from services.loop import run_coroutine, submit_coroutine
 from services.race_engine import (
@@ -190,6 +190,7 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key, 
         "forbidden_text", "replacement_text"
     ))
     review_enabled = bool(review_rules)
+    stream_reviewer = StreamContentReviewer(review_rules) if review_enabled else None
 
     # Ask upstream to include usage in the final chunk so tokens can be logged.
     upstream_body = dict(upstream_body)
@@ -256,7 +257,6 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key, 
     def sync_gen():
         usage = {}
         iterator = w.lines().__aiter__()
-        chunks = []
 
         async def next_chunk():
             return await anext(iterator, SENTINEL)
@@ -267,12 +267,10 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key, 
                 if chunk is SENTINEL:
                     break
                 usage = extract_usage(chunk, usage)
-                if review_enabled:
-                    chunks.append(chunk)
+                if stream_reviewer:
+                    yield from stream_reviewer.process(chunk)
                 else:
                     yield chunk
-            if review_enabled:
-                yield from _review_sse_chunks(chunks, rules=review_rules)
             save_usage(usage)
         except Exception as exc:  # noqa: BLE001
             logger.exception("stream pump failed")
@@ -288,17 +286,14 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key, 
 
     async def _pump():
         usage: dict = {}
-        chunks = []
         response_queue, response_loop = await asyncio.wrap_future(queue_ready)
         try:
             async for chunk in w.lines():
                 usage = extract_usage(chunk, usage)
-                if review_enabled:
-                    chunks.append(chunk)
+                if stream_reviewer:
+                    for reviewed_chunk in stream_reviewer.process(chunk):
+                        await _send(response_queue, response_loop, reviewed_chunk)
                 else:
-                    await _send(response_queue, response_loop, chunk)
-            if review_enabled:
-                for chunk in _review_sse_chunks(chunks, rules=review_rules):
                     await _send(response_queue, response_loop, chunk)
         except Exception as exc:  # noqa: BLE001
             logger.exception("stream pump failed")

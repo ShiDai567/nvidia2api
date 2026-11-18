@@ -709,13 +709,14 @@ class AdminChatView(AdminRequiredMixin, APIView):
         from services.loop import submit_coroutine
         from services.race_engine import AllRoutesFailed, NoRouteAvailable, race_stream
         from apps.core.models import ContentReviewRule
-        from api.openai_views import _review_sse_chunks
+        from services.content_review import StreamContentReviewer
 
         routes = build_routes()
         review_rules = list(ContentReviewRule.objects.filter(enabled=True).order_by("id").values_list(
             "forbidden_text", "replacement_text"
         ))
         review_enabled = bool(review_rules)
+        stream_reviewer = StreamContentReviewer(review_rules) if review_enabled else None
         request_id = key_service.new_request_id()
         log = RequestLog.objects.create(
             request_id=request_id, model=model, routes_count=len(routes), is_stream=True
@@ -792,7 +793,6 @@ class AdminChatView(AdminRequiredMixin, APIView):
 
             async def _pump():
                 usage: dict = {}
-                chunks = []
                 try:
                     async for chunk in winner.lines():
                         try:
@@ -801,12 +801,13 @@ class AdminChatView(AdminRequiredMixin, APIView):
                                 usage = payload["usage"]
                         except Exception:  # noqa: BLE001
                             pass
-                        if review_enabled:
-                            chunks.append(chunk)
+                        if stream_reviewer:
+                            for reviewed_chunk in stream_reviewer.process(chunk):
+                                q.put(reviewed_chunk)
                         else:
                             q.put(chunk)
-                    if review_enabled:
-                        for reviewed_chunk in _review_sse_chunks(chunks, rules=review_rules):
+                    if stream_reviewer:
+                        for reviewed_chunk in stream_reviewer.process("data: [DONE]\n\n"):
                             q.put(reviewed_chunk)
                 except Exception as exc:  # noqa: BLE001
                     q.put(SENTINEL)

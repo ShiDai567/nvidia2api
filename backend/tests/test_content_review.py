@@ -1,8 +1,10 @@
+import json
+
 from django.conf import settings
 from django.test import TestCase
 
 from apps.core.models import ContentReviewRule
-from services.content_review import review_payload, review_text
+from services.content_review import StreamContentReviewer, review_payload, review_text
 from api.openai_views import _review_sse_chunks
 
 
@@ -40,6 +42,27 @@ class ContentReviewTests(TestCase):
         self.assertIn('"content": "clean"', result[-3])
         self.assertIn('"finish_reason":"stop"', result[-2])
         self.assertEqual(result[-1], "data: [DONE]\n\n")
+
+    def test_incremental_stream_emits_safe_prefix_before_completion(self):
+        reviewer = StreamContentReviewer([("badword", "clean")])
+        first = reviewer.process(
+            'data: {"choices":[{"delta":{"content":"A safe sentence, followed by "}}]}\n\n'
+        )
+        self.assertTrue(first)
+        output = "".join(first)
+        output += "".join(reviewer.process(
+            'data: {"choices":[{"delta":{"content":"bad"}}]}\n\n'
+        ))
+        output += "".join(reviewer.process(
+            'data: {"choices":[{"delta":{"content":"word ending."}}]}\n\n'
+        ))
+        output += "".join(reviewer.process("data: [DONE]\n\n"))
+        emitted_text = "".join(
+            json.loads(line[5:])["choices"][0]["delta"].get("content", "")
+            for line in output.splitlines() if line.startswith("data:") and line[5:].strip() != "[DONE]"
+        )
+        self.assertEqual(emitted_text, "A safe sentence, followed by clean ending.")
+        self.assertNotIn("badword", output)
 
     def test_admin_can_manage_multiple_rules(self):
         response = self.client.post("/api/admin/content-review-rules", {

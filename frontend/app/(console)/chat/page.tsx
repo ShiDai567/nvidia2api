@@ -11,6 +11,7 @@ import {
   Copy,
   Loader2,
   MessageSquarePlus,
+  RotateCcw,
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
@@ -98,19 +99,12 @@ export default function ChatPage() {
     if (followLatest) bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages, followLatest]);
 
-  const send = useCallback(async () => {
-    const text = input.trim();
-    if (!text || sending || requestRef.current) return;
-    if (!model) {
-      toast.error("请先在“模型”页面启用至少一个模型");
-      return;
-    }
-    setInput("");
-    setFollowLatest(true);
-    const history: ChatMessage[] = [...messages, { role: "user", content: text }];
+  const requestReply = useCallback(async (history: ChatMessage[]) => {
+    if (sending || requestRef.current || !model) return;
     // Streamed assistant message placeholder — updated in place per SSE chunk
     const assistant: ChatMessage = { role: "assistant", content: "", reasoning: "" };
     setMessages([...history, assistant]);
+    setFollowLatest(true);
     setSending(true);
 
     const controller = new AbortController();
@@ -135,7 +129,30 @@ export default function ChatPage() {
       requestRef.current = null;
       setSending(false);
     }
-  }, [input, messages, model, sending]);
+  }, [model, sending]);
+
+  const send = useCallback(async () => {
+    const text = input.trim();
+    if (!text || sending || requestRef.current) return;
+    if (!model) {
+      toast.error("请先在“模型”页面启用至少一个模型");
+      return;
+    }
+    setInput("");
+    setFollowLatest(true);
+    const history: ChatMessage[] = [...messages, { role: "user", content: text }];
+    await requestReply(history);
+  }, [input, messages, model, requestReply, sending]);
+
+  const regenerate = useCallback((messageIndex: number) => {
+    if (sending || requestRef.current || messages[messageIndex]?.role !== "user") return;
+    void requestReply(messages.slice(0, messageIndex + 1));
+  }, [messages, requestReply, sending]);
+
+  const deleteMessage = useCallback((messageIndex: number) => {
+    if (sending) return;
+    setMessages((current) => current.filter((_, index) => index !== messageIndex));
+  }, [sending]);
 
   return (
     <div className="flex h-[calc(100dvh-8rem)] min-h-[420px] flex-col md:h-[calc(100dvh-3rem)]">
@@ -210,13 +227,14 @@ export default function ChatPage() {
                   key={i}
                   className={m.role === "user" ? "flex justify-end" : "flex justify-start"}
                 >
-                  <div
-                    className={
-                      m.role === "user"
-                        ? "max-w-[90%] rounded-lg bg-white/[0.08] px-4 py-3 text-sm text-gray-100 sm:max-w-[75%]"
-                        : "min-w-0 w-full text-sm text-gray-200"
-                    }
-                  >
+                  <div className={m.role === "user" ? "max-w-[90%] sm:max-w-[75%]" : "min-w-0 w-full"}>
+                    <div
+                      className={
+                        m.role === "user"
+                          ? "rounded-lg bg-white/[0.08] px-4 py-3 text-sm text-gray-100"
+                          : "min-w-0 text-sm text-gray-200"
+                      }
+                    >
                     {m.role === "assistant" && (
                       <div className="mb-3 flex items-center gap-2 text-xs font-medium text-gray-400">
                         <Bot size={16} className="text-accent" /> 助手
@@ -304,9 +322,31 @@ export default function ChatPage() {
                         </div>
                       </details>
                     )}
-                    {m.role === "assistant" &&
-                      m.content &&
-                      !(sending && i === messages.length - 1) && (
+                    </div>
+                    {!sending && m.role === "user" && (
+                      <div className="mt-2 flex justify-end gap-2 px-1">
+                        <button
+                          type="button"
+                          onClick={() => regenerate(i)}
+                          title="重新生成"
+                          aria-label="重新生成"
+                          className="rounded p-1 text-gray-500 transition-colors hover:bg-white/5 hover:text-accent"
+                        >
+                          <RotateCcw size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteMessage(i)}
+                          title="删除用户消息"
+                          aria-label="删除用户消息"
+                          className="rounded p-1 text-gray-500 transition-colors hover:bg-white/5 hover:text-red-400"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    )}
+                    {m.role === "assistant" && m.content && !(sending && i === messages.length - 1) && (
+                      <div className="mt-3 flex items-center gap-2">
                         <button
                           type="button"
                           title="复制回复"
@@ -317,11 +357,23 @@ export default function ChatPage() {
                               () => toast.error("复制失败"),
                             );
                           }}
-                          className="mt-3 rounded p-1 text-gray-500 hover:bg-white/5 hover:text-gray-200"
+                          className="rounded p-1 text-gray-500 hover:bg-white/5 hover:text-gray-200"
                         >
                           <Copy size={14} />
                         </button>
-                      )}
+                        {!sending && (
+                          <button
+                            type="button"
+                            onClick={() => deleteMessage(i)}
+                            title="删除回复"
+                            aria-label="删除回复"
+                            className="rounded p-1 text-gray-500 transition-colors hover:bg-white/5 hover:text-red-400"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
