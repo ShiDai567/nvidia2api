@@ -39,8 +39,12 @@ GET /health  →  {"status": "ok"}
 | `GET /api/admin/dashboard` | keys/proxies/models/请求数/成功率/延迟/今日 tokens/实时并发 + key_status、proxy_status 分布 |
 | `GET /api/admin/dashboard/usage?days=7` | 按天的 token 明细（prompt/completion/total + 请求数，按本地时区分桶） |
 | `GET/PATCH /api/admin/settings` | 运行参数。GET 返回 `[{key,type,value,default,description}]`；PATCH body `{settings:{key:value,...}}` |
+| `GET/POST /api/admin/content-review-rules` | 内容替换规则列表 / 新增 `{forbidden_text,replacement_text,enabled?}` |
+| `PATCH/DELETE /api/admin/content-review-rules/{id}` | 修改规则或删除规则 |
 
 `direct_routes_per_request` 设置每次请求并行参与竞速的直连数，默认 1，必须是大于等于 1 的整数，保存后立即生效。例如：`{"settings":{"direct_routes_per_request":3}}`。传 `null` 恢复环境默认值；非法输入返回 400，整批设置不保存。实际直连数受可用 Key 数和 `max_routes_per_request` 限制，每条直连使用不同 Key。
+
+内容审查规则按创建顺序，对非流式 `choices[].message.content` 和流式输出文本做字符串替换；空替换文本表示删除命中内容。流式内容在输出前缓冲，以保证跨 chunk 的违禁词也能被识别。工具调用参数不做审查。
 
 ## NVIDIA Keys
 

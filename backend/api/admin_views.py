@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.models import (
-    AIModel, NvidiaApiKey, NvidiaApiKeyStatus, Proxy, ProxyStatus,
+    AIModel, ContentReviewRule, NvidiaApiKey, NvidiaApiKeyStatus, Proxy, ProxyStatus,
     RequestLog, SystemSetting, UserApiKey,
 )
 from services import api_key_service, key_service, nvidia_service, proxy_service
@@ -518,6 +518,55 @@ class SettingsView(AdminRequiredMixin, APIView):
         return Response(sysconfig.all_params())
 
 
+class ContentReviewRuleListView(AdminRequiredMixin, APIView):
+    def get(self, request):
+        return Response(list(ContentReviewRule.objects.values(
+            "id", "forbidden_text", "replacement_text", "enabled", "created_at", "updated_at"
+        )))
+
+    def post(self, request):
+        forbidden = request.data.get("forbidden_text")
+        replacement = request.data.get("replacement_text", "")
+        if not isinstance(forbidden, str) or not forbidden:
+            return Response({"detail": "违禁文本不能为空"}, status=400)
+        if not isinstance(replacement, str):
+            return Response({"detail": "替换文本必须是字符串"}, status=400)
+        rule = ContentReviewRule.objects.create(
+            forbidden_text=forbidden, replacement_text=replacement,
+            enabled=request.data.get("enabled", True),
+        )
+        return Response({"id": rule.id, "forbidden_text": rule.forbidden_text,
+                         "replacement_text": rule.replacement_text, "enabled": rule.enabled},
+                        status=201)
+
+
+class ContentReviewRuleDetailView(AdminRequiredMixin, APIView):
+    def patch(self, request, pk):
+        try:
+            rule = ContentReviewRule.objects.get(pk=pk)
+        except ContentReviewRule.DoesNotExist:
+            return Response({"detail": "not found"}, status=404)
+        if "forbidden_text" in request.data:
+            value = request.data["forbidden_text"]
+            if not isinstance(value, str) or not value:
+                return Response({"detail": "违禁文本不能为空"}, status=400)
+            rule.forbidden_text = value
+        if "replacement_text" in request.data:
+            value = request.data["replacement_text"]
+            if not isinstance(value, str):
+                return Response({"detail": "替换文本必须是字符串"}, status=400)
+            rule.replacement_text = value
+        if "enabled" in request.data:
+            rule.enabled = bool(request.data["enabled"])
+        rule.save()
+        return Response({"id": rule.id, "forbidden_text": rule.forbidden_text,
+                         "replacement_text": rule.replacement_text, "enabled": rule.enabled})
+
+    def delete(self, request, pk):
+        deleted, _ = ContentReviewRule.objects.filter(pk=pk).delete()
+        return Response(status=204 if deleted else 404)
+
+
 class DashboardUsageView(AdminRequiredMixin, APIView):
     """Per-day token usage + request counts for the dashboard chart."""
 
@@ -561,6 +610,7 @@ class AdminChatView(AdminRequiredMixin, APIView):
         from services.load_balancer import build_routes
         from services.race_engine import AllRoutesFailed, NoRouteAvailable, race_chat
         from services import key_service
+        from services.content_review import review_payload
 
         model = (request.data.get("model") or "").strip()
         prompt = request.data.get("prompt")
@@ -629,7 +679,7 @@ class AdminChatView(AdminRequiredMixin, APIView):
         )
         return Response({
             "request_id": request_id,
-            "payload": result.payload,
+            "payload": review_payload(result.payload),
             "meta": {
                 "route_type": r.kind,
                 "key_name": r.key.name,
@@ -658,8 +708,14 @@ class AdminChatView(AdminRequiredMixin, APIView):
         from services.load_balancer import build_routes
         from services.loop import submit_coroutine
         from services.race_engine import AllRoutesFailed, NoRouteAvailable, race_stream
+        from apps.core.models import ContentReviewRule
+        from api.openai_views import _review_sse_chunks
 
         routes = build_routes()
+        review_rules = list(ContentReviewRule.objects.filter(enabled=True).order_by("id").values_list(
+            "forbidden_text", "replacement_text"
+        ))
+        review_enabled = bool(review_rules)
         request_id = key_service.new_request_id()
         log = RequestLog.objects.create(
             request_id=request_id, model=model, routes_count=len(routes), is_stream=True
@@ -736,6 +792,7 @@ class AdminChatView(AdminRequiredMixin, APIView):
 
             async def _pump():
                 usage: dict = {}
+                chunks = []
                 try:
                     async for chunk in winner.lines():
                         try:
@@ -744,7 +801,13 @@ class AdminChatView(AdminRequiredMixin, APIView):
                                 usage = payload["usage"]
                         except Exception:  # noqa: BLE001
                             pass
-                        q.put(chunk)
+                        if review_enabled:
+                            chunks.append(chunk)
+                        else:
+                            q.put(chunk)
+                    if review_enabled:
+                        for reviewed_chunk in _review_sse_chunks(chunks, rules=review_rules):
+                            q.put(reviewed_chunk)
                 except Exception as exc:  # noqa: BLE001
                     q.put(SENTINEL)
                     q.put(exc)

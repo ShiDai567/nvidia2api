@@ -179,3 +179,16 @@ class SystemSetting(models.Model):
 
     def __str__(self):
         return self.key
+
+
+class ContentReviewRule(Timestamped):
+    forbidden_text = models.TextField()
+    replacement_text = models.TextField(blank=True, default="")
+    enabled = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        db_table = "content_review_rule"
+        ordering = ["id"]
+
+    def __str__(self):
+        return self.forbidden_text

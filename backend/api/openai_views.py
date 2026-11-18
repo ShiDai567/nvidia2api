@@ -13,6 +13,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from apps.core.models import AIModel, RequestLog
 from services import api_key_service, key_service
+from services.content_review import review_payload, review_text
 from services.load_balancer import build_routes
 from services.loop import run_coroutine, submit_coroutine
 from services.race_engine import (
@@ -159,7 +160,7 @@ def chat_completions(request):
                     proxy_ip=(r.proxy.public_ip if r.proxy else ""),
                     usage=usage, routes=result.report or [])
         api_key_service.record_result(user_key, True)
-        return _with_request_id(JsonResponse(result.payload, status=200), request_id)
+        return _with_request_id(JsonResponse(review_payload(result.payload), status=200), request_id)
     finally:
         _request_semaphore.release()
 
@@ -181,9 +182,14 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key, 
     import asyncio
 
     from services.race_engine import race_stream
+    from apps.core.models import ContentReviewRule
 
     SENTINEL = object()
     queue_ready: Future = Future()
+    review_rules = list(ContentReviewRule.objects.filter(enabled=True).order_by("id").values_list(
+        "forbidden_text", "replacement_text"
+    ))
+    review_enabled = bool(review_rules)
 
     # Ask upstream to include usage in the final chunk so tokens can be logged.
     upstream_body = dict(upstream_body)
@@ -250,6 +256,7 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key, 
     def sync_gen():
         usage = {}
         iterator = w.lines().__aiter__()
+        chunks = []
 
         async def next_chunk():
             return await anext(iterator, SENTINEL)
@@ -260,7 +267,12 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key, 
                 if chunk is SENTINEL:
                     break
                 usage = extract_usage(chunk, usage)
-                yield chunk
+                if review_enabled:
+                    chunks.append(chunk)
+                else:
+                    yield chunk
+            if review_enabled:
+                yield from _review_sse_chunks(chunks, rules=review_rules)
             save_usage(usage)
         except Exception as exc:  # noqa: BLE001
             logger.exception("stream pump failed")
@@ -276,11 +288,18 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key, 
 
     async def _pump():
         usage: dict = {}
+        chunks = []
         response_queue, response_loop = await asyncio.wrap_future(queue_ready)
         try:
             async for chunk in w.lines():
                 usage = extract_usage(chunk, usage)
-                await _send(response_queue, response_loop, chunk)
+                if review_enabled:
+                    chunks.append(chunk)
+                else:
+                    await _send(response_queue, response_loop, chunk)
+            if review_enabled:
+                for chunk in _review_sse_chunks(chunks, rules=review_rules):
+                    await _send(response_queue, response_loop, chunk)
         except Exception as exc:  # noqa: BLE001
             logger.exception("stream pump failed")
             await _send(response_queue, response_loop, SENTINEL)
@@ -348,3 +367,53 @@ def _finish_log(log: RequestLog, started: float, success: bool, http_status: int
     if routes:
         log.routes = routes
     log.save()
+
+
+def _review_sse_chunks(chunks: list[str], rules=None) -> list[str]:
+    """缓冲 SSE 文本后统一审查，确保跨 chunk 的违禁词也能命中。"""
+    output = []
+    trailing = []
+    text_parts = {"content": [], "reasoning_content": []}
+    template = None
+    for chunk in chunks:
+        if not chunk.startswith("data:"):
+            output.append(chunk)
+            continue
+        raw = chunk[5:].strip()
+        if raw == "[DONE]":
+            continue
+        try:
+            payload = json.loads(raw)
+        except (ValueError, TypeError):
+            output.append(chunk)
+            continue
+        choices = payload.get("choices") if isinstance(payload, dict) else None
+        delta = choices[0].get("delta") if choices else None
+        fields = [key for key in text_parts if isinstance(delta.get(key), str)] \
+            if isinstance(delta, dict) else []
+        if fields:
+            if template is None:
+                template = (payload, choices[0], delta)
+            for field in fields:
+                text_parts[field].append(delta[field])
+        else:
+            (trailing if _is_trailing_sse_chunk(chunk) else output).append(chunk)
+    if template is not None:
+        payload, choice, delta = template
+        for field, parts in text_parts.items():
+            if parts:
+                delta[field] = review_text("".join(parts), rules=rules)
+        output.append("data: " + json.dumps(payload, ensure_ascii=False) + "\n\n")
+    output.extend(trailing)
+    output.append("data: [DONE]\n\n")
+    return output
+
+
+def _is_trailing_sse_chunk(chunk: str) -> bool:
+    try:
+        data = json.loads(chunk[5:].strip())
+        return bool(data.get("usage") or (
+            data.get("choices") and data["choices"][0].get("finish_reason")
+        ))
+    except (ValueError, TypeError, KeyError):
+        return False

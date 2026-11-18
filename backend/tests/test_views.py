@@ -456,6 +456,70 @@ class AdminChatViewTests(TestCase):
         self.assertIsNotNone(model.test_latency_ms)
         self.assertIsNotNone(model.last_tested_at)
 
+    def test_content_review_is_applied_to_admin_chat_response(self):
+        from types import SimpleNamespace
+        from django.test import Client
+        from apps.core.models import ContentReviewRule
+        from services.race_engine import RaceResult
+
+        ContentReviewRule.objects.create(forbidden_text="NVIDIA", replacement_text="Google")
+        result = RaceResult(
+            ok=True,
+            route=SimpleNamespace(
+                kind="direct", key=SimpleNamespace(name="k1"), proxy=None,
+            ),
+            payload={"choices": [{"message": {"content": "I am NVIDIA model"}}]},
+            report=[],
+        )
+        with patch("services.load_balancer.build_routes", return_value=[object()]), \
+             patch("services.race_engine.race_chat", return_value=result):
+            response = Client().post(
+                "/api/admin/chat",
+                data=json.dumps({"model": "m/test", "prompt": "Who are you?"}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Token {self.admin_token}",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["payload"]["choices"][0]["message"]["content"],
+                         "I am Google model")
+
+    def test_content_review_is_applied_to_admin_stream_response(self):
+        from types import SimpleNamespace
+        from django.test import Client
+        from apps.core.models import ContentReviewRule
+        from services.race_engine import StreamWinner
+
+        ContentReviewRule.objects.create(forbidden_text="NVIDIA", replacement_text="Google")
+
+        async def lines(_self):
+            yield 'data: {"choices":[{"delta":{"content":"I am NVI"}}]}\n\n'
+            yield 'data: {"choices":[{"delta":{"content":"DIA model"}}]}\n\n'
+            yield 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+            yield "data: [DONE]\n\n"
+
+        async def race(*args):
+            winner = StreamWinner(
+                route=SimpleNamespace(kind="direct", key=SimpleNamespace(name="k1"), proxy=None),
+                client=None, resp_cm=None, aiter=None, first_line="", report=[],
+            )
+            winner.lines = lines.__get__(winner)
+            return winner
+
+        with patch("services.load_balancer.build_routes", return_value=[object()]), \
+             patch("services.race_engine.race_stream", side_effect=race):
+            response = Client().post(
+                "/api/admin/chat",
+                data=json.dumps({"model": "m/test", "stream": True,
+                                 "messages": [{"role": "user", "content": "Who are you?"}]}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Token {self.admin_token}",
+            )
+
+        body = b"".join(response.streaming_content).decode()
+        self.assertIn('"content": "I am Google model"', body)
+        self.assertNotIn("NVIDIA", body)
+
     def test_stream_failure_is_forwarded_as_sse_error(self):
         from django.test import Client
         from services.race_engine import AllRoutesFailed

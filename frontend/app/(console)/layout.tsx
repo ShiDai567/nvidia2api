@@ -7,6 +7,7 @@ import {
   Activity,
   MessageSquareText,
   Boxes,
+  ScanText,
   FileClock,
   Globe2,
   KeyRound,
@@ -25,6 +26,7 @@ const NAV = [
   { href: "/models", label: "模型", icon: Boxes },
   { href: "/api-keys", label: "API Keys", icon: Activity },
   { href: "/request-logs", label: "请求日志", icon: FileClock },
+  { href: "/content-review", label: "内容审查", icon: ScanText },
   { href: "/settings", label: "设置", icon: Settings },
 ];
 
