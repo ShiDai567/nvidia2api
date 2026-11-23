@@ -40,9 +40,11 @@ NVIDIA2API 是面向 NVIDIA AI API 的聚合代理平台：
 
 ## 关键决策
 
+Docker 单镜像以 Nginx `:3000` 为入口，`/api`、`/v1` 和 `/health` 直接转发到 Django `127.0.0.1:8000`，页面转发到 Next.js `127.0.0.1:3001`。API 关闭响应缓冲，读写空闲超时为 180 秒，避免经 Next.js 反代时默认 30 秒超时中断慢请求。本地开发和测试保留 Next.js rewrites。配置及进程管理见 [deployment.md](deployment.md)。
+
 1. **业务不落 View**：`api/*` 只做参数校验与响应拼装，业务都在 `services/`。
 2. **同步视图 + 共享后台事件循环**：竞速在常驻后台线程的单一 event loop 上执行（`services/loop.py`），httpx 连接按代理维度池化、跨请求复用（TCP+TLS 免重复握手）；视图保持同步，避免 ASGI 迁移复杂度。
-3. **SQLite 并发控制**：Key 的 RPM 计数用数据库侧条件 `UPDATE ... WHERE count < rpm_limit`，放弃 `SELECT FOR UPDATE`，避免 SQLite 锁升级死锁（detail 见 [database.md](database.md)）。
+3. **SQLite 并发控制**：启用 WAL 与 IMMEDIATE 短事务；用户/NVIDIA Key 的配额使用条件 UPDATE，Key/代理/用户结果计数使用数据库原子递增，减少读后写的锁升级冲突和丢计数（详见 [database.md](database.md)）。
 4. **运行时参数优先于环境变量**：`SystemSetting` 表中的值覆盖 `.env`，改后即时生效（`sysconfig.py`）。
 5. **直连数可配置**：`direct_routes_per_request` 默认 1，至少 1；线路数受可调度代理数、配置直连数、可用 Key 和总线路上限约束。后端 `set_enabled` 强制代理上限为 `max(未禁用 Key 数 − 配置直连数, 0)`，调度优先为直连预留名额。
 6. **流式错误语义**：流式请求的竞速在返回响应对象**之前**完成——全部线路失败返回真实 502/503 JSON，Winner 确认后才返回 200 + SSE；chunk 通过线程安全队列从事件循环泵给 Django 生成器，事件循环永不被生成器阻塞。注意泵送协程必须用 `submit_coroutine`（fire-and-forget）：若改成阻塞等待（`run_coroutine`），会把整条上游流先灌满队列才返回响应，客户端就会看到"全部一次性蹦出"而非逐字流式。

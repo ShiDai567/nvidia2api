@@ -34,9 +34,13 @@ services:
       CORS_ALLOWED_ORIGINS: ""
     volumes:
       - ./data:/app/data
+    ulimits:
+      nofile:
+        soft: 16384
+        hard: 16384
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      test: ["CMD", "python3", "-c", "import urllib.request; [urllib.request.urlopen(url, timeout=5).close() for url in ('http://127.0.0.1:3000/health', 'http://127.0.0.1:3000/login')]"]
       interval: 30s
       timeout: 10s
       retries: 5

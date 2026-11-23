@@ -160,7 +160,8 @@ def chat_completions(request):
                     proxy_ip=(r.proxy.public_ip if r.proxy else ""),
                     usage=usage, routes=result.report or [])
         api_key_service.record_result(user_key, True)
-        return _with_request_id(JsonResponse(review_payload(result.payload), status=200), request_id)
+        payload = {**result.payload, "model": model_name}
+        return _with_request_id(JsonResponse(review_payload(payload), status=200), request_id)
     finally:
         _request_semaphore.release()
 
@@ -168,6 +169,22 @@ def chat_completions(request):
 def _with_request_id(resp, request_id: str):
     resp["X-Request-Id"] = request_id
     return resp
+
+
+def _with_stream_model(chunk: str, model_name: str) -> str:
+    """统一成功 SSE 分片的模型名，保留心跳、结束标记和错误事件。"""
+    if not model_name or not chunk.startswith("data:"):
+        return chunk
+    try:
+        payload = json.loads(chunk[5:].strip())
+    except (ValueError, TypeError):
+        return chunk
+    if not isinstance(payload, dict) or "error" in payload:
+        return chunk
+    if "choices" not in payload and "usage" not in payload:
+        return chunk
+    payload["model"] = model_name
+    return "data: " + json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n\n"
 
 
 def _stream_response(routes, upstream_body, log, started, request_id, user_key, *, is_asgi=True):
@@ -191,6 +208,13 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key, 
     ))
     review_enabled = bool(review_rules)
     stream_reviewer = StreamContentReviewer(review_rules) if review_enabled else None
+    model_name = upstream_body.get("model", "")
+
+    def outgoing_chunks(chunk):
+        # 审查可能补发尾部分片，故在审查完成后统一模型名。
+        chunks = stream_reviewer.process(chunk) if stream_reviewer else [chunk]
+        for outgoing in chunks:
+            yield _with_stream_model(outgoing, model_name)
 
     # Ask upstream to include usage in the final chunk so tokens can be logged.
     upstream_body = dict(upstream_body)
@@ -267,10 +291,7 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key, 
                 if chunk is SENTINEL:
                     break
                 usage = extract_usage(chunk, usage)
-                if stream_reviewer:
-                    yield from stream_reviewer.process(chunk)
-                else:
-                    yield chunk
+                yield from outgoing_chunks(chunk)
             save_usage(usage)
         except Exception as exc:  # noqa: BLE001
             logger.exception("stream pump failed")
@@ -290,11 +311,8 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key, 
         try:
             async for chunk in w.lines():
                 usage = extract_usage(chunk, usage)
-                if stream_reviewer:
-                    for reviewed_chunk in stream_reviewer.process(chunk):
-                        await _send(response_queue, response_loop, reviewed_chunk)
-                else:
-                    await _send(response_queue, response_loop, chunk)
+                for outgoing in outgoing_chunks(chunk):
+                    await _send(response_queue, response_loop, outgoing)
         except Exception as exc:  # noqa: BLE001
             logger.exception("stream pump failed")
             await _send(response_queue, response_loop, SENTINEL)

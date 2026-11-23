@@ -62,20 +62,30 @@ cd backend && uv run pytest tests
 
 运行环境变量直接配置在 `docker-compose.yml` 的 `environment` 中，无需创建 `.env` 文件。启动前修改其中的 `SECRET_KEY`、`ADMIN_PASSWORD` 和 `ADMIN_TOKEN`；数据目录保持容器路径 `/app/data` 和 `/app/data/db.sqlite3`，通过卷挂载持久化到宿主机 `./data`。
 
-镜像通过显式 `ENTRYPOINT` 使用 `/bin/sh` 执行独立脚本 `docker/start.sh`（镜像内为 `/app/start.sh`），只使用 POSIX sh 语法，无需 `wait -n` 或 Bash。数据库迁移成功后才启动 Django 和 Next.js；脚本每秒检查服务状态，任一服务退出时会停止另一服务并以失败状态退出，交给容器重启策略恢复。收到容器停止信号时会转发给两个服务并等待它们退出。
+镜像通过显式 `ENTRYPOINT` 使用 `/bin/sh` 执行独立脚本 `docker/start.sh`（镜像内为 `/app/start.sh`），只使用 POSIX sh 语法，无需 `wait -n` 或 Bash。先验证 Nginx 配置，数据库迁移成功后启动 Django、Next.js 和 Nginx；脚本每秒检查服务状态，任一服务退出时会停止其余服务并以失败状态退出，交给容器重启策略恢复。收到容器停止信号时会转发给三个服务并等待它们退出。
+
+仅 Docker 打包产物启用 Nginx 统一入口，宿主机端口映射仍为 `3000:3000`：
+
+| 路径 | 容器内目标 |
+| --- | --- |
+| `/api`、`/api/*`、`/v1`、`/v1/*`、`/health` | Django `127.0.0.1:8000` |
+| 页面及静态资源 | Next.js standalone `127.0.0.1:3001` |
+
+配置位于 `docker/nginx.conf`，API 直接转发到 Django，不经过 Next.js rewrites 的默认 30 秒反代超时。API 关闭响应缓冲、缓存和 gzip，保留 SSE 分片；连接超时 10 秒、读写空闲超时 180 秒，生成请求失败时不由 Nginx 重试。请求体上限为 10 MiB；`/v1/chat/completions` 仍由后端执行 4 MiB 校验。若提高上游超时，应同步调整 Nginx 以及外部入口网关、调用方的超时。修改 Nginx 配置后重新构建镜像。本地开发和测试的 `frontend/next.config.mjs` rewrites 与启动命令保持原样。
+
+Nginx 每个 worker 配置 4096 个连接，客户端和上游连接分别占用名额；这不是后端并发容量承诺。Compose 将 `nofile` 软硬上限设为 16384，入口脚本也会尝试将软上限提高到 16384。使用 `docker run` 且运行时限制较低时，增加 `--ulimit nofile=16384:16384`，避免文件描述符不足。
 
 升级时删除部署配置中临时添加的 `entrypoint` 和 `command` 覆盖项，再执行 `docker compose up -d --pull always --force-recreate nvidia2api`。若日志仍显示旧的 `sh: 1: wait: Illegal option -n`，用 `docker inspect nvidia2api --format '{{json .Config.Entrypoint}} {{json .Config.Cmd}} {{.Image}}'` 核对实际容器启动配置；新入口应为 `["/bin/sh","/app/start.sh"]`。
 
-运行镜像显式安装 SQLite 动态库 `libsqlite3-0`，供从 Python 镜像复制的解释器使用。GitLab 构建后使用镜像默认入口执行启动检查：后端 `8000/health` 和前端 `3000/login` 均返回 HTTP 200、容器正常停止后，才推送版本镜像。Compose 健康检查直接访问容器内部的后端 `/health`。
+运行镜像显式安装 Nginx 和 SQLite 动态库 `libsqlite3-0`，后者供从 Python 镜像复制的解释器使用。GitLab 构建后使用镜像默认入口执行启动检查：通过 Nginx `3000` 访问 `/health` 和 `/login` 均返回 HTTP 200，未认证的 `/api/admin/settings` 与 `/v1/models` 返回 JSON 401，容器正常停止后，才推送版本镜像。Compose 健康检查同样通过 Nginx 访问 `/health` 和 `/login`，覆盖入口及前后端服务。
+
+`sh docker/smoke-test.sh <镜像名>` 还会在独立容器内使用替身后端验证真实 Nginx：API 与页面分流（包括 `/api-keys` 页面）、请求体及鉴权头、错误状态、SSE 分片，以及等待 31 秒后返回的慢请求，测试无需 NVIDIA 凭据。
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
-- Docker 镜像从 `uv.lock` 安装 Django 运行依赖；容器内运行 Django，SQLite 落到挂载的 `./data`
-- `frontend` 容器 `npm install && npm run build && npm run start`
-
-仅后端 + 已有前端静态资源可用根 `Dockerfile`：前端先 build（Node 22 阶段），后端挂在 Python 3.12-slim，`DATA_DIR=/app/data`。
+Docker 镜像从 `uv.lock` 安装 Django 运行依赖，并在 Node 22 构建阶段生成 Next.js standalone 产物；运行阶段在同一容器内启动 Nginx、Node.js 和 Python 服务。SQLite 落到挂载的 `./data`，数据目录为 `/app/data`。
 
 ## CI 基础镜像拉取
 
@@ -99,9 +109,9 @@ docker build --build-arg DOCKERHUB_PREFIX=mirror.gcr.io/library -t nvidia2api:lo
 
 ## 生产注意点
 
-- **前置代理**（nginx/caddy）需放行 SSE：`proxy_buffering off`，长连接 `read_timeout` ≥ `UPSTREAM_READ_TIMEOUT`（默认 120s）
+- **外部前置代理**（nginx/caddy）需放行 SSE：关闭响应缓冲，读取超时覆盖容器内 Nginx 的超时预算（默认 180s）。
 - 管理后台对话接口在 ASGI 下逐块发送 SSE；更新后需重启后端或重新构建并启动 Docker 镜像，前置代理仍须关闭响应缓冲。
-- SSE 响应携带 `Cache-Control: no-cache, no-transform`，使 Next.js 反代跳过 gzip 压缩，避免小分片被压缩缓冲到回复结束后才一起展示；前置代理也应保留该响应头。
-- 单实例 SQLite 适合中小流量；要承载大规模并发请迁移 PostgreSQL + Redis，并把 `MAX_CONCURRENT_REQUESTS` 提升
-- 定期备份 `./data/db.sqlite3`
+- SSE 响应携带 `Cache-Control: no-cache, no-transform`，开发环境的 Next.js 反代可据此跳过 gzip；Docker 内置 Nginx 已关闭 API 压缩和响应缓冲，外部前置代理也应保留该响应头。
+- 单实例 SQLite 适合中小流量；Nginx 入口不解决数据库写锁或后端容量问题。大规模并发需要先治理数据库写入和并发准入，再通过压测确定容量；可迁移 PostgreSQL + Redis。
+- SQLite 默认启用 WAL 和 IMMEDIATE 短事务；首次升级时先停止旧服务，再启动新镜像。持久化整个 `./data` 目录至本机磁盘，在线备份使用 SQLite backup API，详见 [database.md](database.md#wal-存储与备份)。
 - 不要让 `/api/admin/*` 直接裸露公网，绑 Basic Auth 或放到内网域名

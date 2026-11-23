@@ -86,7 +86,7 @@ npm run deps:check
 npm run deps:graph > dependencies.dot
 ```
 
-后端默认 `http://127.0.0.1:8000`，跨端口走 `NEXT_PUBLIC_API_BASE_URL`。
+本地开发和测试的后端默认 `http://127.0.0.1:8000`，跨端口走 `NEXT_PUBLIC_API_BASE_URL`，也可使用 Next.js rewrites。Docker 打包产物使用同源 Nginx `:3000` 入口，API 直接转发 Django，页面转发容器内 Next.js `127.0.0.1:3001`，详见 [deployment.md](deployment.md)。
 
 ## 远程开发（Coder / code-server 代理域名）
 
