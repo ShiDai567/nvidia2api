@@ -1,4 +1,4 @@
-# nvidia2api all-in-one image: Django (127.0.0.1:8000, internal) + Next.js (:3000, only exposed port)
+# 单镜像：Nginx (:3000) + Django (127.0.0.1:8000) + Next.js (127.0.0.1:3001)
 
 # CI 可覆盖为镜像缓存前缀；本地默认从 Docker Hub 拉取。
 ARG DOCKERHUB_PREFIX=docker.io/library
@@ -16,10 +16,10 @@ RUN npm run build
 # Stage 2: Python runtime (Django 6 requires Python 3.12+)
 FROM ${DOCKERHUB_PREFIX}/python:3.12-slim-bookworm AS python-runtime
 
-# Stage 3: runtime (Node for Next.js + Python for Django, same container)
+# Stage 3: runtime (Nginx + Node + Python, same container)
 FROM ${DOCKERHUB_PREFIX}/node:22-bookworm-slim
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libsqlite3-0 \
+    && apt-get install -y --no-install-recommends ca-certificates libsqlite3-0 nginx \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=python-runtime /usr/local /usr/local
@@ -36,10 +36,11 @@ COPY backend/ .
 COPY --from=fe /fe/.next/standalone ./frontend
 COPY --from=fe /fe/.next/static ./frontend/.next/static
 COPY --from=fe /fe/public ./frontend/public
+COPY docker/nginx.conf /etc/nginx/nginx.conf
 COPY --chmod=755 docker/start.sh /app/start.sh
 
 EXPOSE 3000
-# Django 仅监听内部地址，Next.js 的 3000 端口作为统一入口。
+# 前后端仅监听内部地址，Nginx 的 3000 端口作为统一入口。
 # 显式入口覆盖 Node 基础镜像入口，避免继承命令影响进程管理。
 ENTRYPOINT ["/bin/sh", "/app/start.sh"]
 CMD []

@@ -55,8 +55,13 @@ DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": os.environ.get("DATABASE_PATH", str(DATA_DIR / "db.sqlite3")),
-        # Serialize writers & allow lock waits: protects per-key RPM counters under concurrency.
-        "OPTIONS": {"timeout": 30},
+        # WAL 允许读写并行；事务预先领取写锁，避免 DEFERRED 读后写的锁升级冲突。
+        # 热点计数仍使用条件 UPDATE，超时仅作为其他短事务的等待预算。
+        "OPTIONS": {
+            "timeout": 30,
+            "transaction_mode": "IMMEDIATE",
+            "init_command": "PRAGMA journal_mode=WAL;",
+        },
         "TEST": {"NAME": str(DATA_DIR / "test_db.sqlite3")},
     }
 }

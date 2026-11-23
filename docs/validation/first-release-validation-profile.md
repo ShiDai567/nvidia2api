@@ -179,9 +179,9 @@ SRS-F-017 要求能力矩阵覆盖下列维度，但这些能力是否纳入某�
 
 | 方面 | 仓库可确认的基线 | 目标环境登记/待确认 |
 |---|---|---|
-| 拓扑 | SRS/HLD 约束单后端 worker、SQLite 单实例；Docker Compose 单服务仅发布 Next.js `3000`，挂载 `./data:/app/data` | 主机 CPU、内存、磁盘/IO、操作系统、容器运行时、网络带宽及实际单 worker 部署证据待部署方登记；关联 SRS-F-036、TBD-05 |
+| 拓扑 | SRS/HLD 约束单后端 worker、SQLite 单实例；Docker Compose 单服务仅发布 Nginx `3000`，挂载 `./data:/app/data` | 主机 CPU、内存、磁盘/IO、操作系统、容器运行时、网络带宽及实际单 worker 部署证据待部署方登记；关联 SRS-F-036、TBD-05 |
 | 数据持久化 | 容器内数据库路径为 `/app/data/db.sqlite3`，数据目录挂载到宿主机 `./data` | 目标卷/磁盘、权限、加密、空间监控和保护方式待确认；备份恢复目标单独追踪 TBD-07 |
-| 前端到后端 | Next.js `output: "standalone"`；`/api/*`、`/v1/*` rewrite 到 `BACKEND_INTERNAL_URL`，默认 `http://127.0.0.1:8000`；单镜像设计中 Django 绑定容器内 loopback | 确认发布版本、实际内部 URL、端口隔离及请求/SSE 路径；不得将内部后端端口作为未经批准的外部入口 |
+| 前端到后端 | Docker 内 Nginx 将 `/api`、`/v1`、`/health` 直接转发到 Django `127.0.0.1:8000`，页面到 Next.js standalone `127.0.0.1:3001`；本地开发和测试仍通过 rewrites 或 `NEXT_PUBLIC_API_BASE_URL` 访问后端 | 确认发布版本、实际内部 URL、端口隔离及请求/SSE 路径；不得将内部后端端口作为未经批准的外部入口 |
 | TLS 与外部入口 | 部署要求外部用户 API 和管理面经 TLS；受控反向代理应支持 SSE 并关闭响应缓冲。[部署文档](../deployment.md) 对长流 read timeout 的建议是至少覆盖 `UPSTREAM_READ_TIMEOUT`（当前仓库默认 120 秒）；这是仓库参考值，不是已批准的目标环境值 | TLS 终止位置、证书、明文访问处理、域名/入口、目标超时和 SSE flush/timeout 检查待部署方批准并实测；关联 SRS-F-028、TBD-10 |
 | 管理网络 | 管理 API 使用固定 Bearer `ADMIN_TOKEN`；生产管理面不得裸露公网 | 允许的管理网段、身份/访问控制、密钥注入位置和安全评审状态待部署方确认；关联 SRS-F-027、030、TBD-08、TBD-10 |
 | Direct Route | 上游基准地址默认为 `https://integrate.api.nvidia.com/v1` | 目标网络出口、DNS/TLS/防火墙策略和真实连通性未知，待部署方/运营方确认 |
@@ -208,7 +208,7 @@ TBD-11 只有在真实环境冒烟证据完成后才能按 SRS 的关闭条件�
 |---|---|---|
 | 主机资源 | 目标主机 CPU、内存、磁盘/IO、OS、容器运行时、网络带宽；单后端 worker 部署证据 | 部署方 |
 | 持久化 | SQLite 卷路径、权限、加密、空间监控与保护；备份/恢复另按 TBD-07 | 部署方 |
-| 前后端链路 | Next.js standalone；`/api`、`/v1` rewrite 到后端实际内部 URL；端口隔离与 SSE 路径 | 部署方 |
+| 前后端链路 | Docker 内 Nginx 直代 `/api`、`/v1` 到后端，页面到 Next.js standalone；本地开发和测试保留 rewrites；端口隔离与 SSE 路径 | 部署方 |
 | TLS 与外部入口 | TLS 终止位置、证书、明文处理、域名/入口、`UPSTREAM_READ_TIMEOUT` 覆盖与 SSE flush | 部署方 |
 | 管理网络 | 允许网段、身份/访问控制、`ADMIN_TOKEN` 注入位置 | 部署方 |
 | Direct Route | 上游 `https://integrate.api.nvidia.com/v1` 的网络出口、DNS/TLS/防火墙与连通性 | 部署方/运营方 |

@@ -27,8 +27,9 @@
 
 支持的参数（透传 NVIDIA；未列出的会被丢弃）：`model`、`messages`、`temperature`、`top_p`、`max_tokens`、`stream`、`stop`、`n`、`seed`、`frequency_penalty`、`presence_penalty`、`response_format`、`tools`、`tool_choice`。
 
-- **非流式**：竞速在返回前完成——直接返回 NVIDIA 原始 JSON，或对应的错误状态码。
-- **流式**：竞速同样在返回前完成。所有线路失败时返回真实的 502/503 + OpenAI 风格 JSON 错误（**不会**返回 200 后在流里塞错误）；有 Winner 时返回 `200 + text/event-stream`，上游 chunk 透传，结尾 `data: [DONE]`。
+- **非流式**：竞速在返回前完成——返回经内容审查的上游 JSON，成功响应顶层 `model` 统一使用本服务收到的请求 `model`；失败时返回对应错误状态码。
+- **流式**：竞速同样在返回前完成。所有线路失败时返回真实的 502/503 + OpenAI 风格 JSON 错误（**不会**返回 200 后在流里塞错误）；有 Winner 时返回 `200 + text/event-stream`。成功的内容、工具调用、结束及 usage 分片的顶层 `model` 均使用请求模型名，审查补发分片同样处理；保留 `data: [DONE]`、心跳与错误事件。
+- 模型名统一仅影响对外响应标识，上游请求的模型参数仍按请求透传，日志 `model` 仍记录本服务收到的请求模型。若外层中转站在调用本服务前已改写模型名，本服务只能使用改写后的名称，无法获知外层原始别名。
 - ASGI 部署（包括 Docker 内的 Uvicorn）使用异步响应迭代器逐段发送 SSE，首段内容在上游生成结束前即可到达客户端。
 - 响应头 `X-Request-Id` 可用于在请求日志页定位记录。
 - 平台自动注入 `stream_options.include_usage` 以记录 token 用量（对用户透明）。

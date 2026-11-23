@@ -6,7 +6,7 @@ import logging
 from datetime import timedelta
 from urllib.parse import urlparse
 
-from django.db import transaction
+from django.db.models import Case, F, Value, When
 from django.utils import timezone
 
 from apps.core.models import NvidiaApiKey, NvidiaApiKeyStatus, Proxy, ProxyStatus
@@ -103,31 +103,34 @@ def set_enabled(proxy: Proxy, enabled: bool) -> tuple[bool, str]:
 
 def report_proxy_result(proxy_id: int, success: bool, latency_ms: float | None = None):
     now = timezone.now()
-    with transaction.atomic():
-        p = Proxy.objects.select_for_update().get(pk=proxy_id)
-        if success:
-            p.success_count += 1
-            p.consecutive_failures = 0
-            p.status = ProxyStatus.HEALTHY
-            if latency_ms is not None:
-                p.latency_ms = latency_ms
-            p.cooldown_until = None
-            p.save(update_fields=[
-                "success_count", "consecutive_failures", "status",
-                "latency_ms", "cooldown_until", "updated_at",
-            ])
-        else:
-            p.failure_count += 1
-            p.consecutive_failures += 1
-            if p.consecutive_failures >= __import__("services.sysconfig", fromlist=["get"]).get("proxy_unhealthy_threshold"):
-                p.status = ProxyStatus.UNHEALTHY
-                p.cooldown_until = now + timedelta(seconds=__import__("services.sysconfig", fromlist=["get"]).get("proxy_failure_cooldown_seconds"))
-            elif p.consecutive_failures >= 1:
-                p.status = ProxyStatus.DEGRADED
-            p.save(update_fields=[
-                "failure_count", "consecutive_failures", "status",
-                "cooldown_until", "updated_at",
-            ])
+    if success:
+        updates = {
+            "success_count": F("success_count") + 1,
+            "consecutive_failures": 0,
+            "status": ProxyStatus.HEALTHY,
+            "cooldown_until": None,
+            "updated_at": now,
+        }
+        if latency_ms is not None:
+            updates["latency_ms"] = latency_ms
+    else:
+        # CASE 条件读取更新前的计数，+1 后达到阈值时同步设置状态与冷却。
+        threshold = sysconfig.get("proxy_unhealthy_threshold") - 1
+        cooldown = now + timedelta(seconds=sysconfig.get("proxy_failure_cooldown_seconds"))
+        updates = {
+            "failure_count": F("failure_count") + 1,
+            "consecutive_failures": F("consecutive_failures") + 1,
+            "status": Case(
+                When(consecutive_failures__gte=threshold, then=Value(ProxyStatus.UNHEALTHY)),
+                default=Value(ProxyStatus.DEGRADED),
+            ),
+            "cooldown_until": Case(
+                When(consecutive_failures__gte=threshold, then=Value(cooldown)),
+                default=F("cooldown_until"),
+            ),
+            "updated_at": now,
+        }
+    Proxy.objects.filter(pk=proxy_id).update(**updates)
 
 
 def schedulable_proxies() -> list[Proxy]:

@@ -63,7 +63,7 @@ npm run dev                     # http://localhost:3000
 docker compose up -d
 ```
 
-单镜像运行前后端：仅暴露 Next.js `3000` 端口，Django 只监听容器内 `127.0.0.1:8000`，由 Next.js rewrites 将 `/api`、`/v1` 反代到后端。SQLite 数据保存在宿主 `./data`（已挂载到容器 `/app/data`），容器销毁不丢数据。容器内置健康检查（`/health`）；任一进程退出容器即重启。
+单镜像运行 Nginx、前后端：仅暴露 Nginx `3000` 端口，`/api`、`/v1`、`/health` 直接转发到容器内 Django `127.0.0.1:8000`，页面转发到 Next.js `127.0.0.1:3001`。API 关闭响应缓冲，代理读写超时为 180 秒。SQLite 数据保存在宿主 `./data`（已挂载到容器 `/app/data`），容器销毁不丢数据。Compose 健康检查通过 Nginx 检查 `/health` 和 `/login`；任一服务进程退出时容器重启。本地开发和测试仍沿用现有 Next.js rewrites。
 
 **注意**：Docker Compose 的运行环境变量已完整列在 `docker-compose.yml` 的 `environment` 中，直接修改对应值即可，无需创建 `.env` 文件。
 

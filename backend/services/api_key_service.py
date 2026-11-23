@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+from datetime import timedelta
 
-from django.db import transaction
+from django.db.models import Case, F, Q, Value, When
 from django.utils import timezone
 
 from apps.core.models import UserApiKey
@@ -37,31 +38,29 @@ def authenticate(raw: str | None) -> UserApiKey | None:
 
 
 def check_and_count(rec: UserApiKey) -> tuple[bool, str]:
-    """Rate-limit + count a user request. Concurrency-safe."""
+    """用一条条件 UPDATE 同时校验配额、滚动窗口并递增，避免读锁升级。"""
     now = timezone.now()
-    with transaction.atomic():
-        key = UserApiKey.objects.select_for_update().get(pk=rec.pk)
-        if not key.enabled:
-            return False, "disabled"
-        if key.rate_limit and key.rate_limit > 0:
-            if key.minute_window_start is None or (
-                (now - key.minute_window_start).total_seconds() >= 60
-            ):
-                key.minute_window_start = now
-                key.minute_request_count = 0
-            if key.minute_request_count >= key.rate_limit:
-                return False, "rate_limited"
-        key.minute_request_count += 1
-        key.total_requests += 1
-        key.last_used_at = now
-        key.save(update_fields=[
-            "minute_window_start", "minute_request_count", "total_requests", "last_used_at"
-        ])
-    return True, ""
+    stale = Q(minute_window_start__isnull=True) | Q(
+        minute_window_start__lte=now - timedelta(seconds=60)
+    )
+    claimed = UserApiKey.objects.filter(pk=rec.pk, enabled=True).filter(
+        stale | Q(rate_limit__lte=0) | Q(minute_request_count__lt=F("rate_limit"))
+    ).update(
+        minute_window_start=Case(When(stale, then=Value(now)), default=F("minute_window_start")),
+        minute_request_count=Case(When(stale, then=Value(1)), default=F("minute_request_count") + 1),
+        total_requests=F("total_requests") + 1,
+        last_used_at=now,
+    )
+    if claimed:
+        return True, ""
+    # 失败后只读以区分禁用与超限，不再持有事务或进行写入。
+    if not UserApiKey.objects.filter(pk=rec.pk, enabled=True).exists():
+        return False, "disabled"
+    return False, "rate_limited"
 
 
 def record_result(rec: UserApiKey | None, success: bool):
     if rec is None:
         return
     field = "success_requests" if success else "failed_requests"
-    UserApiKey.objects.filter(pk=rec.pk).update(**{field: getattr(rec, field, 0) + 1})
+    UserApiKey.objects.filter(pk=rec.pk).update(**{field: F(field) + 1})

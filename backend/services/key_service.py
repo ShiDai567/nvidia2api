@@ -8,8 +8,7 @@ from dataclasses import dataclass
 from django.conf import settings
 from datetime import timedelta
 
-from django.db import transaction
-from django.db.models import Q
+from django.db.models import Case, F, Q, Value, When
 from django.utils import timezone
 
 from services import sysconfig
@@ -112,29 +111,25 @@ def _score(k: NvidiaApiKey):
 def claim_rpm_slot(key_id: int) -> bool:
     """Atomically claim one RPM slot. Uses conditional UPDATEs (no SELECT ... FOR UPDATE)
     so it is safe under SQLite's serialized write locking across threads."""
-    from django.db.models import F
-
     now = timezone.now()
     window_cutoff = now - timedelta(seconds=MINUTE_SECONDS)
     ok_states = [NvidiaApiKeyStatus.AVAILABLE, NvidiaApiKeyStatus.RATE_LIMITED,
                  NvidiaApiKeyStatus.ERROR]
-    base = NvidiaApiKey.objects.filter(pk=key_id, status__in=ok_states).filter(
+    base = NvidiaApiKey.objects.filter(pk=key_id, status__in=ok_states, rpm_limit__gt=0).filter(
         Q(cooldown_until__isnull=True) | Q(cooldown_until__lte=now)
     )
-    # Case 1: window stale -> reset window and claim first slot (recovers rate_limited too).
-    reset = base.filter(
+    stale = (
         Q(minute_window_start__isnull=True) | Q(minute_window_start__lte=window_cutoff)
-    ).update(
-        minute_window_start=now, minute_request_count=1, last_used_at=now,
-        status=NvidiaApiKeyStatus.AVAILABLE,
     )
-    if reset:
-        return True
-    # Case 2: window active -> claim only if under rpm_limit.
+    # 单条条件更新同时处理窗口重置与窗口内递增，减少常态请求的写语句数。
     claimed = base.filter(
-        minute_window_start__gt=window_cutoff,
-        minute_request_count__lt=F("rpm_limit"),
-    ).update(minute_request_count=F("minute_request_count") + 1, last_used_at=now)
+        stale | Q(minute_request_count__lt=F("rpm_limit"))
+    ).update(
+        minute_window_start=Case(When(stale, then=Value(now)), default=F("minute_window_start")),
+        minute_request_count=Case(When(stale, then=Value(1)), default=F("minute_request_count") + 1),
+        last_used_at=now,
+        status=Case(When(stale, then=Value(NvidiaApiKeyStatus.AVAILABLE)), default=F("status")),
+    )
     if claimed:
         return True
     # Over limit (or disabled/cooling): mark rate_limited if the limit was actually hit.
@@ -148,15 +143,15 @@ def claim_rpm_slot(key_id: int) -> bool:
 
 
 def report_success(key_id: int):
-    now = timezone.now()
-    with transaction.atomic():
-        key = NvidiaApiKey.objects.select_for_update().get(pk=key_id)
-        key.success_count += 1
-        key.cooldown_until = None
-        key.last_error = ""
-        if key.status == NvidiaApiKeyStatus.RATE_LIMITED:
-            key.status = NvidiaApiKeyStatus.AVAILABLE
-        key.save(update_fields=["success_count", "cooldown_until", "last_error", "status"])
+    NvidiaApiKey.objects.filter(pk=key_id).update(
+        success_count=F("success_count") + 1,
+        cooldown_until=None,
+        last_error="",
+        status=Case(
+            When(status=NvidiaApiKeyStatus.RATE_LIMITED, then=Value(NvidiaApiKeyStatus.AVAILABLE)),
+            default=F("status"),
+        ),
+    )
 
 
 def report_failure(key_id: int, error_type: str, http_status: int = 0):
@@ -174,19 +169,15 @@ def report_failure(key_id: int, error_type: str, http_status: int = 0):
         cooldown_seconds = max(30, int(sysconfig.get("key_cooldown_seconds") / 2))
     else:  # timeout / network / 5xx
         cooldown_seconds = sysconfig.get("key_cooldown_seconds")
-    with transaction.atomic():
-        key = NvidiaApiKey.objects.select_for_update().get(pk=key_id)
-        key.failure_count += 1
-        key.last_error = f"{error_type}:{http_status}" if http_status else error_type
-        fields = ["failure_count", "last_error"]
-        if new_status:
-            key.status = new_status
-            fields.append("status")
-        if cooldown_seconds:
-            from datetime import timedelta
-            key.cooldown_until = now + timedelta(seconds=cooldown_seconds)
-            fields.append("cooldown_until")
-        key.save(update_fields=fields)
+    updates = {
+        "failure_count": F("failure_count") + 1,
+        "last_error": f"{error_type}:{http_status}" if http_status else error_type,
+    }
+    if new_status:
+        updates["status"] = new_status
+    if cooldown_seconds:
+        updates["cooldown_until"] = now + timedelta(seconds=cooldown_seconds)
+    NvidiaApiKey.objects.filter(pk=key_id).update(**updates)
     logger.info("key %s marked failure type=%s http=%s cooldown=%ss",
                 key_id, error_type, http_status, cooldown_seconds)
 
