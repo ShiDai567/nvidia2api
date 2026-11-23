@@ -136,7 +136,7 @@ export default function DashboardPage() {
           icon={Activity}
           label="实时并发"
           value={stats ? `${stats.active_requests ?? 0} / ${stats.concurrent_limit ?? "—"}` : "—"}
-          sub={`执行中 / 动态上限 · 排队 ${stats?.queued_requests ?? 0}`}
+          sub="执行中 / 并发上限"
         />
         <StatCard
           icon={Gauge}

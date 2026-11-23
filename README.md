@@ -116,7 +116,7 @@ print(resp.choices[0].message.content)
 
 - Key 的 RPM 计数使用 SQLite 条件更新（`UPDATE ... WHERE count < rpm_limit`）保证原子性，多线程下不会超限（有并发测试验证）。
 - 用户 Key 的 429 响应带 `Retry-After` 头；参数校验失败不消耗配额；每个响应带 `X-Request-Id` 便于对账。
-- 提供全局并发信号量（`MAX_CONCURRENT_REQUESTS`）、单请求线路数上限（`MAX_ROUTES_PER_REQUEST`）、上游超时（`UPSTREAM_CONNECT/READ_TIMEOUT`）等保护，防止资源耗尽。
+- 提供单进程并发上限（`MAX_CONCURRENT_REQUESTS`）、单请求线路数上限（`MAX_ROUTES_PER_REQUEST`）、上游超时（`UPSTREAM_CONNECT/READ_TIMEOUT`）等保护，防止资源耗尽。
 - 项目预留了迁移 PostgreSQL/Redis 的结构空间，当前仅用 SQLite。
 
 ## 环境变量

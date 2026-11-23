@@ -225,7 +225,6 @@ export interface DashboardStats {
   avg_latency_s?: number;
   tokens_today?: number;
   active_requests?: number;
-  queued_requests?: number;
   concurrent_limit?: number;
   key_status?: Record<string, number>;
   proxy_status?: Record<string, number>;

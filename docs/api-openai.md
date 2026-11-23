@@ -33,8 +33,7 @@
 - ASGI 部署（包括 Docker 内的 Uvicorn）使用异步响应迭代器逐段发送 SSE，首段内容在上游生成结束前即可到达客户端。
 - 响应头 `X-Request-Id` 可用于在请求日志页定位记录。
 - 平台自动注入 `stream_options.include_usage` 以记录 token 用量（对用户透明）。
-- 流式请求在发送 `data: [DONE]` 之前保存总耗时与已收到的 usage，避免下游收到结束标记立即关闭时丢失统计。上游不返回 usage 时，token 保持 0，但总耗时仍保存。
-- 下游在结束前中断时保存已收到的用量与耗时，日志标记为 `error / client_disconnected / 499`；上游传输异常标记为 `stream_error / 502`。日志里的 499/502 表示结束原因，已发出的 SSE HTTP 200 无法追溯更改。首字时间表示竞速胜出时间，不能代替完整响应耗时。
+- 流式请求在发送 `data: [DONE]` 前保存已收到的 token 用量与总耗时。下游提前断开时日志记录 `client_disconnected`（499），上游传输异常记录 `stream_error`（502）。
 
 ### New API 模型映射配置
 
@@ -83,7 +82,7 @@ New API 渠道将 `google/gemini-3.1-pro` 映射到 `nvidia/nemotron-3.5-lightni
 | EC-04 | 404 | `model_not_found` | 模型不存在或未在控制台启用 |
 | EC-05 | 400 | `invalid_request` | |
 | EC-06 | 413 | `payload_too_large` | 请求体 > 4MB |
-| EC-07 | 429 | `rate_limit_exceeded` / `queue_full` / `queue_timeout` | 带 `Retry-After` 头 |
+| EC-07 | 429 | `rate_limit_exceeded` / `server_overloaded` | 带 `Retry-After` 头 |
 | EC-08 | 502 | `upstream_error` | 所有线路均失败 |
 | EC-09 | 503 | `no_available_route` | 没有可用 NVIDIA Key/线路 |
 | EC-10 | 待 API 契约裁定 | 待 API 契约裁定 | SRS-F-020 要求覆盖内部错误并返回 OpenAI 风格错误对象；状态映射、`error.code`、消息脱敏规则及运行时行为待确认/验证 |
@@ -120,20 +119,4 @@ for chunk in r:
 
 ## 保护
 
-聊天接口采用按服务端到达时间排序的等待队列。同一到达时间按登记顺序处理；先鉴权并校验请求，通过后排队，排队不占用用户及 NVIDIA RPM 配额。当前没有启用且有效的 Key 时直接返回 503；Key 暂时冷却或 RPM 耗尽时等待恢复。
-
-动态并发上限为 `min(max_concurrent_requests, floor(可调度 Key 数 / 单次计划竞速线路数))`。计划线路数沿用线路构建规则：`min(可调度代理数 + 配置直连数, 可调度 Key 数, max_routes_per_request)`，直连至少一条；没有可调度 Key 时容量为 0。例如 12 个可调度 Key、每次 3 条线路，允许同时执行 4 个对话。容量约每 0.2 秒重算；缩容时已开始的对话继续执行，等待活跃数降到新上限后才放行。
-
-非流式对话执行完成后归还名额；流式对话在结束、上游错误或客户端断开并完成清理后归还，首字到达不会释放名额。此上限限制对话数量，不额外保证不同对话独占 Key；Key 的 RPM 仍通过数据库条件更新领取。后台 `/api/admin/chat` 的模型测试不进入此队列。
-
-运行参数可在控制台设置，无需重启：
-
-| 参数 | 默认值 | 说明 |
-|---|---:|---|
-| `max_concurrent_requests` | 环境变量 `MAX_CONCURRENT_REQUESTS`，默认 100 | 动态并发数的硬上限 |
-| `max_queued_requests` | 1000 | 等待队列最大长度，不含执行中的对话 |
-| `request_queue_timeout` | 120 秒 | 从聊天入口到达时刻开始计算的最大排队时间 |
-
-队列满或超时返回 HTTP 429 与 OpenAI 风格错误，`error.code` 分别为 `queue_full`、`queue_timeout`，并带 `Retry-After: 1`。客户端应将响应头等待超时设为大于排队时间与上游首字等待时间之和；ASGI 下排队断开会移除等待项。
-
-队列和活跃计数保存在单个后端进程内，与默认 Docker 单 Uvicorn worker 一致；多 worker 或多副本部署时各进程分别调度，不能将此上限视为集群共享上限。WSGI 下排队会占用请求线程，推荐使用默认 ASGI 部署。排队失败的请求不创建竞速日志；现有首字时间和总耗时从准入后开始计算，不含排队时间。
+每个进程按 `max_concurrent_requests` 限制并发，默认取环境变量 `MAX_CONCURRENT_REQUESTS`（默认 100）。后台修改后对新请求生效。达到上限时立即返回 HTTP 429（`server_overloaded`），并附 `Retry-After: 1`。流式请求选出胜出线路并返回响应后释放名额。无可用线路时直接返回 HTTP 503（`no_available_route`）。

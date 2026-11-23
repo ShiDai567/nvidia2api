@@ -33,28 +33,20 @@ class Route:
         return f"{self.proxy.name}+{self.key.name}"
 
 
-def planned_route_count(key_count: int, proxy_count: int, max_routes: int | None = None) -> int:
-    """只计算线路数，供排队容量与实际线路构建共用，不消耗配额。"""
-    cfg_max = max(1, sysconfig.get("max_routes_per_request"))
-    limit = min(max_routes or cfg_max, cfg_max)
-    direct_count = min(max(1, sysconfig.get("direct_routes_per_request")), key_count, limit)
-    return min(proxy_count + direct_count, key_count, limit)
-
-
 def build_routes(max_routes: int | None = None) -> list[Route]:
     """Build race routes.
 
     线路数 = min(可调度代理数 + 配置直连数, 可用 Key 数, 总线路上限)。
     优先为直连预留名额，每条线路分配不同的 Key，多余 Key 留给后续请求轮换。
     """
-    cfg_max = max(1, sysconfig.get("max_routes_per_request"))
+    cfg_max = sysconfig.get("max_routes_per_request")
     max_routes = min(max_routes or cfg_max, cfg_max)
 
     proxies = proxy_service.schedulable_proxies()
     keys = key_service.available_keys()
 
     direct_count = min(max(1, sysconfig.get("direct_routes_per_request")), len(keys), max_routes)
-    route_count = planned_route_count(len(keys), len(proxies), max_routes)
+    route_count = min(len(proxies) + direct_count, len(keys), max_routes)
     if route_count <= 0:
         return []
     proxies = proxies[: route_count - direct_count]

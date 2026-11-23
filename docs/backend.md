@@ -31,7 +31,7 @@ backend/
 - `api/urls.py`：所有端点注册
 - `api/auth.py`：`admin_required`/`AdminRequiredMixin`（`Authorization: Token <ADMIN_TOKEN>`）、`openai_error()` 统一错误格式
 - `api/admin_views.py`：后台全部视图（登录/Keys/Proxies/Models/UserKeys/Logs/Dashboard/Usage/Settings/Chat）
-- `api/openai_views.py`：`/v1/models`、`/v1/chat/completions`，全局 `BoundedSemaphore(MAX_CONCURRENT_REQUESTS)`，OpenAI 错误码
+- `api/openai_views.py`：`/v1/models`、`/v1/chat/completions`，按 `max_concurrent_requests` 检查单进程并发数，返回 OpenAI 错误码
 - `api/serializers.py`：所有序列化器；NVIDIA Key 默认脱敏，仅 `?reveal=1` 时返回明文
 
 ## 日志

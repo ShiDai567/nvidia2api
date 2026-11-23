@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from concurrent.futures import Future
 
@@ -11,17 +12,24 @@ from django.http import JsonResponse, StreamingHttpResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from apps.core.models import AIModel, RequestLog
-from services import api_key_service, key_service
+from services import api_key_service, key_service, sysconfig
 from services.content_review import StreamContentReviewer, review_payload, review_text
 from services.load_balancer import build_routes
 from services.loop import run_coroutine, submit_coroutine
 from services.race_engine import (
     AllRoutesFailed, NoRouteAvailable, race_chat,
 )
-from services.request_queue import QueueFull, QueueTimeout, cached_capacity_snapshot, request_queue
 from .auth import openai_error
 
 logger = logging.getLogger("nvidia2api.openai")
+
+_active_requests = 0
+_active_lock = threading.Lock()
+
+
+def active_requests():
+    with _active_lock:
+        return _active_requests
 
 
 def _authenticate(request):
@@ -63,42 +71,8 @@ ALLOWED_PARAMS = {
 
 
 @csrf_exempt
-async def chat_completions(request):
-    import asyncio
-
-    from asgiref.sync import sync_to_async
-
-    arrived_at = time.monotonic()
-    prepared = await sync_to_async(_prepare_chat)(request)
-    if not isinstance(prepared, tuple):
-        return prepared
-
-    async def snapshot():
-        return await sync_to_async(cached_capacity_snapshot)()
-
-    try:
-        lease = await request_queue.acquire(arrived_at, snapshot)
-    except (QueueFull, QueueTimeout) as exc:
-        code = "queue_full" if isinstance(exc, QueueFull) else "queue_timeout"
-        response = openai_error("请求队列已满" if code == "queue_full" else "请求排队超时",
-                                code, 429)
-        response["Retry-After"] = "1"
-        return response
-
-    # 同步竞速无法被取消强行终止，断开时等其返回后关闭资源并归还名额。
-    task = asyncio.create_task(sync_to_async(_execute_chat)(request, prepared, lease))
-    try:
-        return await asyncio.shield(task)
-    except asyncio.CancelledError:
-        try:
-            response = await task
-            await sync_to_async(response.close)()
-        finally:
-            lease.release()
-        raise
-
-
-def _prepare_chat(request):
+def chat_completions(request):
+    global _active_requests
     if request.method != "POST":
         return openai_error("Method not allowed", "method_not_allowed", 405)
 
@@ -135,27 +109,21 @@ def _prepare_chat(request):
             f"The model '{model_name}' is not allowed for this API key",
             "model_not_allowed", 403, "invalid_request_error")
 
-    from apps.core.models import NvidiaApiKey, NvidiaApiKeyStatus
-
-    if not NvidiaApiKey.objects.exclude(status__in=[
-        NvidiaApiKeyStatus.DISABLED, NvidiaApiKeyStatus.INVALID
-    ]).filter(rpm_limit__gt=0).exists():
-        return openai_error("当前没有可用线路（没有可用的 NVIDIA Key）", "no_available_route", 503)
-    return user_key, body, model_name, response_model
-
-
-def _execute_chat(request, prepared, lease):
-    user_key, body, model_name, response_model = prepared
+    limit = max(1, sysconfig.get("max_concurrent_requests"))
+    with _active_lock:
+        if _active_requests >= limit:
+            response = openai_error("Server busy, too many concurrent requests", "server_overloaded", 429)
+            response["Retry-After"] = "1"
+            return response
+        _active_requests += 1
     try:
-        return _execute_admitted_chat(request, user_key, body, model_name, response_model, lease)
+        return _execute_chat(request, user_key, body, model_name, response_model)
     finally:
-        # 流式响应将名额交给完整流生命周期；其他路径（包括异常）立即归还。
-        if not lease.stream_owned:
-            lease.release()
+        with _active_lock:
+            _active_requests -= 1
 
 
-def _execute_admitted_chat(request, user_key, body, model_name, response_model, lease):
-    # 排队期间不消耗用户或 NVIDIA 的 RPM 配额，准入后重新检查用户状态。
+def _execute_chat(request, user_key, body, model_name, response_model):
     ok, reason = api_key_service.check_and_count(user_key)
     if not ok:
         if reason == "rate_limited":
@@ -184,12 +152,9 @@ def _execute_admitted_chat(request, user_key, body, model_name, response_model, 
                          "no_available_route", 503), request_id)
 
     if stream:
-        response = _stream_response(routes, upstream_body, log, started,
+        return _stream_response(routes, upstream_body, log, started,
                                     request_id, user_key, is_asgi=hasattr(request, "scope"),
-                                    response_model=response_model, on_close=lease.release)
-        if response.streaming:
-            lease.stream_owned = True
-        return response
+                                response_model=response_model)
 
     try:
         result = race_chat(routes, upstream_body, settings.NVIDIA_BASE_URL)
@@ -237,7 +202,7 @@ def _with_stream_model(chunk: str, model_name: str) -> str:
 
 
 def _stream_response(routes, upstream_body, log, started, request_id, user_key, *, is_asgi=True,
-                     response_model=None, on_close=None):
+                     response_model=None):
     """Streaming with correct HTTP semantics: the race is resolved BEFORE the
     response object is returned, so callers get a real status code:
     502/503 with an OpenAI-style JSON error when every route fails, and 200 +
@@ -352,11 +317,7 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key, 
         try:
             save_usage({}, "client_disconnected")
         finally:
-            try:
-                run_coroutine(w.close())
-            finally:
-                if on_close:
-                    on_close()
+            run_coroutine(w.close())
 
     def sync_gen():
         nonlocal stream_started
@@ -396,11 +357,7 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key, 
                 if not finalized:
                     save_usage(usage, error_type)
             finally:
-                try:
-                    run_coroutine(w.close())
-                finally:
-                    if on_close:
-                        on_close()
+                run_coroutine(w.close())
 
     async def _send(response_queue, response_loop, item):
         pending = asyncio.run_coroutine_threadsafe(response_queue.put(item), response_loop)
@@ -443,11 +400,7 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key, 
                     # 保存由生产者负责，避免请求事件循环取消后丢失已读用量。
                     await asyncio.to_thread(save_usage_in_worker, usage, error_type)
             finally:
-                try:
-                    await w.close()
-                finally:
-                    if on_close:
-                        on_close()
+                await w.close()
         await _send(response_queue, response_loop, SENTINEL)
         await _send(response_queue, response_loop, usage)
 

@@ -112,7 +112,7 @@ class StreamingResponseModelTests(TransactionTestCase):
                 if is_asgi:
                     request.scope = {}
                 with patch("services.race_engine.race_stream", side_effect=race):
-                    response = async_to_sync(chat_completions)(request)
+                    response = chat_completions(request)
                     self.assertEqual(response.status_code, 200)
                     body = (async_to_sync(collect)(response) if is_asgi else
                             b"".join(response.streaming_content).decode())

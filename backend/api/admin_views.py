@@ -486,16 +486,17 @@ class DashboardView(AdminRequiredMixin, APIView):
             "success_rate": round(success_count / today_count * 100, 1) if today_count else 0.0,
             "avg_latency_s": round((agg["avg_ms"] or 0) / 1000, 2),
             "tokens_today": agg["total_tokens"] or 0,
-            **_request_queue_stats(),
+            **_concurrency_stats(),
             "key_status": key_status,
             "proxy_status": proxy_status,
         })
 
 
-def _request_queue_stats() -> dict:
-    from services.request_queue import capacity_snapshot, request_queue
+def _concurrency_stats() -> dict:
+    from api.openai_views import active_requests
+    from services import sysconfig
 
-    return {**request_queue.stats(), "concurrent_limit": capacity_snapshot()[0]}
+    return {"active_requests": active_requests(), "concurrent_limit": max(1, sysconfig.get("max_concurrent_requests"))}
 
 
 class SettingsView(AdminRequiredMixin, APIView):

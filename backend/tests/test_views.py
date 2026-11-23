@@ -69,6 +69,26 @@ class ChatViewValidationTests(TestCase):
         body = resp.json()
         self.assertEqual(body["error"]["code"], "model_not_allowed")
 
+    def test_concurrency_limit_rejects_immediately_then_admits_next_request(self):
+        from api.openai_views import active_requests
+        from services import sysconfig
+
+        sysconfig.set_params({"max_concurrent_requests": 1})
+        body = {"model": "m/test", "messages": [{"role": "user", "content": "hi"}]}
+
+        def competing_request():
+            self.assertEqual(active_requests(), 1)
+            response = self._post(body)
+            self.assertEqual(response.status_code, 429)
+            self.assertEqual(response.json()["error"]["code"], "server_overloaded")
+            self.assertEqual(response["Retry-After"], "1")
+            return []
+
+        with patch("api.openai_views.build_routes", side_effect=competing_request):
+            self.assertEqual(self._post(body).status_code, 503)
+        self.assertEqual(active_requests(), 0)
+        self.assertEqual(self._post(body).json()["error"]["code"], "no_available_route")
+
     def test_models_list_filtered_by_allowed(self):
         AIModel.objects.create(model_name="m/other", enabled=True)
         self.rec.allowed_models = ["m/test"]

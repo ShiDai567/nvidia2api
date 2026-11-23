@@ -6,8 +6,6 @@ without a restart.
 """
 from __future__ import annotations
 
-import math
-
 from django.conf import settings
 
 from apps.core.models import SystemSetting
@@ -20,9 +18,7 @@ RUNTIME_PARAMS: dict[str, tuple[str, object, str]] = {
     "proxy_timeout": ("float", lambda: settings.PROXY_TIMEOUT, "代理测速超时（秒）"),
     "upstream_connect_timeout": ("float", lambda: settings.UPSTREAM_CONNECT_TIMEOUT, "上游连接超时（秒）"),
     "upstream_read_timeout": ("float", lambda: settings.UPSTREAM_READ_TIMEOUT, "上游读超时（秒）"),
-    "max_concurrent_requests": ("int", lambda: settings.MAX_CONCURRENT_REQUESTS, "动态对话并发数的最大上限（即时生效）"),
-    "max_queued_requests": ("int", 1000, "最多等待中的对话数（不含执行中的对话）"),
-    "request_queue_timeout": ("float", 120.0, "对话排队最长等待时间（秒）"),
+    "max_concurrent_requests": ("int", lambda: settings.MAX_CONCURRENT_REQUESTS, "单进程并发请求上限，流式请求计至选出胜出线路"),
     "proxy_failure_cooldown_seconds": ("int", 60, "代理连续失败后的冷却时间（秒）"),
     "proxy_unhealthy_threshold": ("int", 3, "代理连续失败多少次后标记为 unhealthy"),
     "key_cooldown_seconds": ("int", 60, "NVIDIA Key 失败后冷却时间（秒）"),
@@ -65,17 +61,14 @@ def all_params() -> list[dict]:
 
 
 def set_params(updates: dict) -> None:
-    for key in ("max_concurrent_requests", "max_queued_requests", "request_queue_timeout"):
-        value = updates.get(key)
-        if value is None:
-            continue
+    value = updates.get("max_concurrent_requests")
+    if value is not None:
         try:
-            number = float(str(value)) if key == "request_queue_timeout" else int(str(value))
-            valid = not isinstance(value, bool) and math.isfinite(number) and number > 0
-        except (TypeError, ValueError, OverflowError):
+            valid = int(str(value)) > 0
+        except ValueError:
             valid = False
         if not valid:
-            raise ValueError(f"{key} 必须为大于 0 的{'数值' if key == 'request_queue_timeout' else '整数'}")
+            raise ValueError("max_concurrent_requests 必须为大于 0 的整数")
     # 先校验整批更新，避免无效直连数导致同一次请求的其他设置部分保存。
     direct = updates.get("direct_routes_per_request")
     if direct is not None:
