@@ -84,6 +84,8 @@ def chat_completions(request):
         return openai_error("Invalid JSON body", "invalid_request", 400, "invalid_request_error")
 
     model_name = body.get("model", "")
+    # New API 可在模型映射后通过约定头保留原始名称，仅用于对外响应标识。
+    response_model = request.headers.get("X-Original-Model", "").strip() or model_name
     messages = body.get("messages")
     if not model_name or not isinstance(messages, list) or not messages:
         return openai_error("model and messages are required", "invalid_request",
@@ -138,7 +140,8 @@ def chat_completions(request):
 
         if stream:
             return _stream_response(routes, upstream_body, log, started,
-                                    request_id, user_key, is_asgi=hasattr(request, "scope"))
+                                    request_id, user_key, is_asgi=hasattr(request, "scope"),
+                                    response_model=response_model)
 
         try:
             result = race_chat(routes, upstream_body, settings.NVIDIA_BASE_URL)
@@ -160,7 +163,7 @@ def chat_completions(request):
                     proxy_ip=(r.proxy.public_ip if r.proxy else ""),
                     usage=usage, routes=result.report or [])
         api_key_service.record_result(user_key, True)
-        payload = {**result.payload, "model": model_name}
+        payload = {**result.payload, "model": response_model}
         return _with_request_id(JsonResponse(review_payload(payload), status=200), request_id)
     finally:
         _request_semaphore.release()
@@ -187,7 +190,8 @@ def _with_stream_model(chunk: str, model_name: str) -> str:
     return "data: " + json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n\n"
 
 
-def _stream_response(routes, upstream_body, log, started, request_id, user_key, *, is_asgi=True):
+def _stream_response(routes, upstream_body, log, started, request_id, user_key, *, is_asgi=True,
+                     response_model=None):
     """Streaming with correct HTTP semantics: the race is resolved BEFORE the
     response object is returned, so callers get a real status code:
     502/503 with an OpenAI-style JSON error when every route fails, and 200 +
@@ -208,7 +212,7 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key, 
     ))
     review_enabled = bool(review_rules)
     stream_reviewer = StreamContentReviewer(review_rules) if review_enabled else None
-    model_name = upstream_body.get("model", "")
+    model_name = response_model or upstream_body.get("model", "")
 
     def outgoing_chunks(chunk):
         # 审查可能补发尾部分片，故在审查完成后统一模型名。

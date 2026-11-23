@@ -29,10 +29,41 @@
 
 - **非流式**：竞速在返回前完成——返回经内容审查的上游 JSON，成功响应顶层 `model` 统一使用本服务收到的请求 `model`；失败时返回对应错误状态码。
 - **流式**：竞速同样在返回前完成。所有线路失败时返回真实的 502/503 + OpenAI 风格 JSON 错误（**不会**返回 200 后在流里塞错误）；有 Winner 时返回 `200 + text/event-stream`。成功的内容、工具调用、结束及 usage 分片的顶层 `model` 均使用请求模型名，审查补发分片同样处理；保留 `data: [DONE]`、心跳与错误事件。
-- 模型名统一仅影响对外响应标识，上游请求的模型参数仍按请求透传，日志 `model` 仍记录本服务收到的请求模型。若外层中转站在调用本服务前已改写模型名，本服务只能使用改写后的名称，无法获知外层原始别名。
+- 模型名统一仅影响对外响应标识，上游请求的模型参数仍按请求透传，权限校验与日志 `model` 仍使用请求体模型。外层中转站如已改写模型，可通过约定请求头 `X-Original-Model` 传入原始名称；成功 JSON 和 SSE 分片优先使用该头的非空值，否则使用请求体 `model`。该头不会发往 NVIDIA；本服务无法从映射后的模型自动推导原始名称。
 - ASGI 部署（包括 Docker 内的 Uvicorn）使用异步响应迭代器逐段发送 SSE，首段内容在上游生成结束前即可到达客户端。
 - 响应头 `X-Request-Id` 可用于在请求日志页定位记录。
 - 平台自动注入 `stream_options.include_usage` 以记录 token 用量（对用户透明）。
+
+### New API 模型映射配置
+
+New API 渠道将 `google/gemini-3.1-pro` 映射到 `nvidia/nemotron-3.5-lightning-30b-a3b` 时，本服务收到的请求体 `model` 已是 Nemotron。要让响应使用原始别名，需升级到包含 `X-Original-Model` 支持的本服务版本，并在 New API 对应渠道的「参数覆盖」中合并以下操作：
+
+```json
+{
+  "operations": [
+    {
+      "mode": "set_header",
+      "path": "X-Original-Model",
+      "value": "google/gemini-3.1-pro",
+      "conditions": [
+        {
+          "path": "original_model",
+          "mode": "full",
+          "value": "google/gemini-3.1-pro"
+        }
+      ]
+    }
+  ]
+}
+```
+
+此配置基于 New API 当前主分支的 `set_header` 操作和 `original_model` 条件上下文；旧版本需先确认支持这两个功能。一个渠道有多个别名时，每个别名添加一条对应条件与头值的操作。不要将 `{original_model}` 当作自动插值模板，当前核对的源码不会对 `set_header.value` 执行这种替换。
+
+仅服务一个固定别名的渠道，也可在「请求头覆盖」设置 `{"X-Original-Model":"google/gemini-3.1-pro"}`；多个别名共用渠道时应使用上面的条件操作，避免全部返回同一个名称。不要覆盖渠道原有鉴权或其他自定义头配置。
+
+配置后普通和流式响应的 `model` 应为 `google/gemini-3.1-pro`，New API 的「上游请求模型」仍可显示 Nemotron，因为它记录真实出站请求。对外别名不会改变实际模型能力，管理员应保留模型映射信息。
+
+参考：[New API 参数覆盖源码](https://github.com/QuantumNous/new-api/blob/main/relay/common/override.go)、[渠道管理文档](https://docs.newapi.pro/zh/docs/guide/feature-guide/admin/channel)。
 
 ## 错误格式
 
