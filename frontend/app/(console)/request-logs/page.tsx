@@ -26,6 +26,74 @@ interface LogPage {
 
 const PAGE_SIZE = 100;
 
+type ChatSnapshot = { total: number; messages: unknown[] };
+
+function LogMessages({ id }: { id: number }) {
+  const [snapshot, setSnapshot] = useState<ChatSnapshot | null | undefined>();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function showMessages() {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await api.get<{ snapshot: ChatSnapshot | null }>(
+        `/api/admin/logs/${id}/messages`,
+      );
+      setSnapshot(data.snapshot);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "加载聊天内容失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <section className="mt-4 border-t border-white/10 pt-3">
+      {snapshot === undefined ? (
+        <Button onClick={showMessages} loading={loading}>
+          查看聊天内容
+        </Button>
+      ) : snapshot === null ? (
+        <p className="text-xs text-gray-400">这条历史日志未保存聊天内容。</p>
+      ) : (
+        <>
+          <h3 className="mb-2 text-sm font-medium">
+            聊天内容 · 已保存 {snapshot.messages.length} / {snapshot.total} 条
+          </h3>
+          <ol className="max-h-96 space-y-3 overflow-y-auto">
+            {snapshot.messages.map((value, i) => {
+              const msg = value && typeof value === "object" && "role" in value ? value : null;
+              const text =
+                msg &&
+                "content" in msg &&
+                typeof msg.content === "string" &&
+                Object.keys(msg).length === 2
+                  ? msg.content
+                  : JSON.stringify(value, null, 2);
+              return (
+                <li key={i}>
+                  <div className="text-xs text-gray-400">
+                    {i + 1} · {String(msg?.role ?? "消息")}
+                  </div>
+                  <pre className="mt-1 max-w-prose whitespace-pre-wrap break-all font-sans text-sm">
+                    {text}
+                  </pre>
+                </li>
+              );
+            })}
+          </ol>
+        </>
+      )}
+      {error && (
+        <p role="alert" className="mt-2 text-xs text-red-400">
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}
+
 export default function RequestLogsPage() {
   const [logs, setLogs] = useState<RequestLog[]>([]);
   const [total, setTotal] = useState(0);
@@ -245,6 +313,7 @@ export default function RequestLogsPage() {
                           </div>
                         ))
                       )}
+                      <LogMessages key={l.id} id={l.id} />
                     </div>
                   </Td>
                 </tr>

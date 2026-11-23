@@ -23,7 +23,9 @@ const PARAM_DISPLAY: Record<string, { group: string; label: string; unit: string
     },
     proxy_timeout: { group: "连接与超时", label: "代理测速超时", unit: "秒" },
     upstream_connect_timeout: { group: "连接与超时", label: "上游连接超时", unit: "秒" },
-    upstream_read_timeout: { group: "连接与超时", label: "上游读取超时", unit: "秒" },
+    upstream_read_timeout: { group: "连接与超时", label: "NVIDIA 回复超时", unit: "秒" },
+    log_retention_days: { group: "请求日志", label: "日志保留天数", unit: "天", min: 0 },
+    log_message_limit: { group: "请求日志", label: "每次请求保存的消息数", unit: "条", min: 0 },
     max_concurrent_requests: { group: "请求与路由", label: "请求并发上限", unit: "个", min: 1 },
     proxy_failure_cooldown_seconds: { group: "故障恢复", label: "代理失败冷却时间", unit: "秒" },
     proxy_unhealthy_threshold: { group: "故障恢复", label: "代理连续失败阈值", unit: "次" },
@@ -62,6 +64,7 @@ export default function SettingsPage() {
       const settings: Record<string, string | number> = {};
       for (const p of params) {
         const raw = draft[p.key] ?? String(p.value);
+        if (raw.trim() === "") throw new Error(`请填写${PARAM_DISPLAY[p.key]?.label ?? p.key}`);
         settings[p.key] = p.type === "int" || p.type === "float" ? Number(raw) : raw;
       }
       const updated = await api.patch<RuntimeParam[]>("/api/admin/settings", { settings });

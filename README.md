@@ -144,7 +144,7 @@ LOG_LEVEL / NEXT_PUBLIC_API_BASE_URL
   1. 修改 `ADMIN_PASSWORD` / `ADMIN_TOKEN` / `SECRET_KEY`（默认值仅供首次启动）；
   2. 不要将端口直接暴露公网时保留默认口令；
   3. 登录接口自带防爆破（5 分钟 10 次失败锁定），如需更强防护请加反向代理层限流；
-  4. 请求日志会持续增长，建议 cron 定期 `python manage.py clean_logs --days 30`。
+  4. 在「设置 → 请求日志」可调整日志保留天数（默认 30，0 表示永久保存）和每次请求保存的消息数（默认前 50 条，0 表示全部）。写入或查看日志时每小时最多执行一次清理。空闲时也需要定时清理的部署可通过 cron 运行 `python manage.py clean_logs`。
 
 ## 文档
 

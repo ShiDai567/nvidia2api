@@ -6,6 +6,8 @@ without a restart.
 """
 from __future__ import annotations
 
+import math
+
 from django.conf import settings
 
 from apps.core.models import SystemSetting
@@ -17,11 +19,13 @@ RUNTIME_PARAMS: dict[str, tuple[str, object, str]] = {
     "direct_routes_per_request": ("int", lambda: settings.DIRECT_ROUTES_PER_REQUEST, "每次请求并行直连数（至少 1 条，每条使用不同 Key；受可用 Key 数和总线路上限限制）"),
     "proxy_timeout": ("float", lambda: settings.PROXY_TIMEOUT, "代理测速超时（秒）"),
     "upstream_connect_timeout": ("float", lambda: settings.UPSTREAM_CONNECT_TIMEOUT, "上游连接超时（秒）"),
-    "upstream_read_timeout": ("float", lambda: settings.UPSTREAM_READ_TIMEOUT, "上游读超时（秒）"),
+    "upstream_read_timeout": ("float", lambda: settings.UPSTREAM_READ_TIMEOUT, "等待 NVIDIA 完整回复或下一段流式数据的最长时间（秒），超时断开连接。空行与心跳不延长等待。"),
     "max_concurrent_requests": ("int", lambda: settings.MAX_CONCURRENT_REQUESTS, "单进程并发请求上限，流式请求计至选出胜出线路"),
     "proxy_failure_cooldown_seconds": ("int", 60, "代理连续失败后的冷却时间（秒）"),
     "proxy_unhealthy_threshold": ("int", 3, "代理连续失败多少次后标记为 unhealthy"),
     "key_cooldown_seconds": ("int", 60, "NVIDIA Key 失败后冷却时间（秒）"),
+    "log_retention_days": ("int", 30, "超过期限的请求日志及聊天内容会自动删除，0 表示永久保存。"),
+    "log_message_limit": ("int", 50, "每次请求按原顺序保存的前几条聊天消息，0 表示保存全部。仅管理员可查看。"),
 }
 
 
@@ -61,6 +65,23 @@ def all_params() -> list[dict]:
 
 
 def set_params(updates: dict) -> None:
+    for key in ("log_retention_days", "log_message_limit"):
+        value = updates.get(key)
+        if value is not None:
+            try:
+                valid = int(str(value)) >= 0
+            except ValueError:
+                valid = False
+            if not valid:
+                raise ValueError(f"{key} 必须为非负整数")
+    timeout = updates.get("upstream_read_timeout")
+    if timeout is not None:
+        try:
+            seconds = float(str(timeout))
+        except ValueError:
+            seconds = 0
+        if not math.isfinite(seconds) or seconds <= 0:
+            raise ValueError("NVIDIA 回复超时必须为大于 0 的秒数")
     value = updates.get("max_concurrent_requests")
     if value is not None:
         try:

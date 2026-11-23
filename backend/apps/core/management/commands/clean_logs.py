@@ -6,29 +6,27 @@ Usage:
 """
 from __future__ import annotations
 
-from datetime import timedelta
-
-from django.core.management.base import BaseCommand
-from django.utils import timezone
+from django.core.management.base import BaseCommand, CommandError
 
 from apps.core.models import RequestLog
+from services import sysconfig
+from services.request_logs import delete_expired
 
 
 class Command(BaseCommand):
     help = "Clean old request logs"
 
     def add_arguments(self, parser):
-        parser.add_argument("--days", type=int, default=30,
-                            help="delete logs older than this many days (default 30)")
+        parser.add_argument("--days", type=int, help="保留天数，默认使用面板设置，0 表示全部保存")
         parser.add_argument("--keep", type=int, default=0,
                             help="alternatively keep only the newest N rows")
 
     def handle(self, *args, **options):
         days = options["days"]
         keep = options["keep"]
+        if keep < 0 or (days is not None and days < 0):
+            raise CommandError("天数和条数必须为非负整数")
         if keep:
-            cutoff_id = (RequestLog.objects.order_by("-id")
-                         .values_list("id", flat=True)[min(keep - 1, 0)] if keep else 0)
             total = RequestLog.objects.count()
             if keep < total:
                 threshold = list(RequestLog.objects.order_by("-id")
@@ -41,6 +39,7 @@ class Command(BaseCommand):
             self.stdout.write("nothing to delete")
             return
 
-        cutoff = timezone.now() - timedelta(days=days)
-        deleted, _ = RequestLog.objects.filter(created_at__lt=cutoff).delete()
+        if days is None:
+            days = sysconfig.get("log_retention_days")
+        deleted = delete_expired(days)
         self.stdout.write(self.style.SUCCESS(f"deleted {deleted} logs older than {days} days"))

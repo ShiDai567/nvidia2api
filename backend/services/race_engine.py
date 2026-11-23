@@ -118,7 +118,7 @@ def _classify_error(exc: Exception) -> tuple[str, int]:
     # evidence that the NVIDIA key or proxy endpoint itself is unhealthy.
     if isinstance(exc, FileNotFoundError):
         return "local_file_error", 0
-    if isinstance(exc, httpx.TimeoutException):
+    if isinstance(exc, (TimeoutError, httpx.TimeoutException)):
         return "timeout", 0
     if isinstance(exc, httpx.ConnectError):
         return "connect_error", 0
@@ -141,11 +141,12 @@ async def _do_request(route: Route, body: dict, base_url: str,
     }
     try:
         from services.loop import acquire_client
-        client = acquire_client(route.proxy.url if route.proxy is not None else None,
-                                _client_timeout())
-        resp = await client.post(
-            f"{base_url}/chat/completions", json=body, headers=headers
-        )
+        timeout = _client_timeout()
+        client = acquire_client(route.proxy.url if route.proxy is not None else None, timeout)
+        async with asyncio.timeout(timeout.read):
+            resp = await client.post(
+                f"{base_url}/chat/completions", json=body, headers=headers, timeout=timeout
+            )
         data: dict[str, Any] = {}
         try:
             data = resp.json()
@@ -252,6 +253,22 @@ async def _race(routes: list[Route], body: dict, base_url: str) -> RaceResult:
     raise AllRoutesFailed(errors, report)
 
 
+async def _data_lines(response, seconds):
+    """每次拉取最多等待一个读取周期。空行和 SSE 心跳不能延长等待。"""
+    lines = response.aiter_lines()
+    while True:
+        try:
+            async with asyncio.timeout(seconds):
+                async for line in lines:
+                    if line.startswith("data:") and line[5:].strip():
+                        break
+                else:
+                    return
+        except (TimeoutError, httpx.ReadTimeout) as exc:
+            raise httpx.ReadTimeout("等待 NVIDIA 流式数据超时") from exc
+        yield line
+
+
 async def _stream_first_valid(route: Route, body: dict, base_url: str):
     """Open a streaming connection; yield (client_ctx, response, first_chunk) on validity.
 
@@ -265,34 +282,28 @@ async def _stream_first_valid(route: Route, body: dict, base_url: str):
     resp_cm = None
     try:
         from services.loop import acquire_client
-        client = acquire_client(route.proxy.url if route.proxy is not None else None,
-                                _client_timeout())
+        timeout = _client_timeout()
+        client = acquire_client(route.proxy.url if route.proxy is not None else None, timeout)
         resp_cm = client.stream(
-            "POST", f"{base_url}/chat/completions", json=body, headers=headers
+            "POST", f"{base_url}/chat/completions", json=body, headers=headers, timeout=timeout
         )
-        resp = await resp_cm.__aenter__()
+        async with asyncio.timeout(timeout.read):
+            resp = await resp_cm.__aenter__()
+            ait = _data_lines(resp, timeout.read)
+            first_line = await anext(ait, None) if resp.status_code == 200 else None
         if resp.status_code != 200:
             typ = _classify_status(resp.status_code, {})
             _mark_failure(route, typ, resp.status_code)
             await resp_cm.__aexit__(None, None, None)
             return None, route_info(route, "failed", error=typ, http_status=resp.status_code)
-        first_line: str | None = None
-        ait = resp.aiter_lines()
-        async for line in ait:
-            if not line.strip():
-                continue
-            if is_valid_stream_chunk(line) is not None:
-                first_line = line
-                break
-            # a data line present but invalid -> invalid response
-            if line.startswith("data:"):
-                _mark_failure(route, "invalid_response", 200)
-                await resp_cm.__aexit__(None, None, None)
-                return None, route_info(route, "failed", error="invalid_response", http_status=200)
         if first_line is None:
             _mark_failure(route, "empty_stream", 200)
             await resp_cm.__aexit__(None, None, None)
             return None, route_info(route, "failed", error="empty_stream", http_status=200)
+        if is_valid_stream_chunk(first_line) is None:
+            _mark_failure(route, "invalid_response", 200)
+            await resp_cm.__aexit__(None, None, None)
+            return None, route_info(route, "failed", error="invalid_response", http_status=200)
         _mark_success(route)
         return (client, resp_cm, resp, ait, first_line), None
     except asyncio.CancelledError:
@@ -332,31 +343,36 @@ async def race_stream_winner(routes: list[Route], body: dict, base_url: str):
         asyncio.ensure_future(_stream_first_valid(r, body, base_url)): r for r in routes
     }
     report: list[dict] = []
-    n_failed = 0
+    winner_task = None
     try:
         pending = set(tasks.keys())
-        while pending and n_failed < len(routes):
+        while pending:
             done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-            for t in done:
-                res, fail_info = t.result()
-                if res is not None:
-                    winner_route = tasks[t]
-                    latency = (_time.monotonic() - t0) * 1000
-                    report.append(route_info(winner_route, "winner", latency))
-                    for p in pending:
-                        p.cancel()
-                    await asyncio.gather(*pending, return_exceptions=True)
-                    for p in pending:
-                        report.append(route_info(
-                            tasks[p], "cancelled",
-                            (_time.monotonic() - t0) * 1000, "winner decided"))
-                    client, resp_cm, resp, ait, first_line = res
-                    return winner_route, client, resp_cm, resp, ait, first_line, report
+            for task in done:
+                res, fail_info = task.result()
                 if fail_info:
                     report.append(fail_info)
-                n_failed += 1
+                elif res is not None and winner_task is None:
+                    winner_task = task
+                else:
+                    report.append(route_info(tasks[task], "cancelled", error="winner decided"))
+            if winner_task is not None:
+                winner_route = tasks[winner_task]
+                latency = (_time.monotonic() - t0) * 1000
+                report.append(route_info(winner_route, "winner", latency))
+                report.extend(route_info(tasks[task], "cancelled", latency, "winner decided")
+                              for task in pending)
+                res, _ = winner_task.result()
+                return winner_route, *res, report
     finally:
-        pass
+        # 同一轮可能有多个已打开响应的成功任务。仅胜者的连接交给调用方。
+        losers = tasks.keys() - {winner_task}
+        for task in losers:
+            if not task.done():
+                task.cancel()
+        for result in await asyncio.gather(*losers, return_exceptions=True):
+            if isinstance(result, tuple) and result[0] is not None:
+                await result[0][1].__aexit__(None, None, None)
     failures = [r for r in report if r.get("status") == "failed"] or report
     errors = []
     for failure in failures:

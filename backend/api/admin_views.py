@@ -16,6 +16,7 @@ from apps.core.models import (
 )
 from services import api_key_service, key_service, nvidia_service, proxy_service
 from services.proxy_checker import check_all, check_proxy_retry
+from services.request_logs import create_log, sweep_if_due
 
 from .auth import AdminRequiredMixin, check_login_allowed, note_login_failure
 from .serializers import (
@@ -418,7 +419,8 @@ class UserApiKeyDetailView(AdminRequiredMixin, APIView):
 
 class LogListView(AdminRequiredMixin, APIView):
     def get(self, request):
-        qs = RequestLog.objects.order_by("-id")
+        sweep_if_due()
+        qs = RequestLog.objects.defer("chat_snapshot").order_by("-id")
         model = request.query_params.get("model")
         status = request.query_params.get("status")
         key_id = request.query_params.get("api_key")
@@ -454,6 +456,15 @@ class LogListView(AdminRequiredMixin, APIView):
             "offset": offset,
             "next_offset": offset + limit if offset + limit < total else None,
         })
+
+
+class LogMessagesView(AdminRequiredMixin, APIView):
+    def get(self, request, pk):
+        from django.shortcuts import get_object_or_404
+
+        sweep_if_due()
+        log = get_object_or_404(RequestLog.objects.only("chat_snapshot"), pk=pk)
+        return Response({"snapshot": log.chat_snapshot}, headers={"Cache-Control": "no-store"})
 
 
 class DashboardView(AdminRequiredMixin, APIView):
@@ -618,7 +629,7 @@ class AdminChatView(AdminRequiredMixin, APIView):
         messages = request.data.get("messages")
         if prompt and not messages:
             messages = [{"role": "user", "content": str(prompt)}]
-        if not model or not messages:
+        if not model or not isinstance(messages, list) or not messages:
             return Response({"error": {"message": "model and prompt/messages required",
                                        "code": "bad_request"}}, status=400)
         if not AIModel.objects.filter(model_name=model).exists():
@@ -635,7 +646,7 @@ class AdminChatView(AdminRequiredMixin, APIView):
         routes = build_routes()
         started = timezone.now().timestamp()
         request_id = key_service.new_request_id()
-        log = RequestLog.objects.create(request_id=request_id, model=model,
+        log = create_log(messages, request_id=request_id, model=model,
                                         routes_count=len(routes))
         if not routes:
             log.status, log.http_status, log.error_type = "error", 503, "no_available_route"
@@ -719,7 +730,7 @@ class AdminChatView(AdminRequiredMixin, APIView):
         review_enabled = bool(review_rules)
         stream_reviewer = StreamContentReviewer(review_rules) if review_enabled else None
         request_id = key_service.new_request_id()
-        log = RequestLog.objects.create(
+        log = create_log(body["messages"],
             request_id=request_id, model=model, routes_count=len(routes), is_stream=True
         )
         # Ask upstream for usage in the last SSE chunk so we can record tokens.

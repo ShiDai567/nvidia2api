@@ -102,10 +102,15 @@ GET /api/admin/logs?model=&status=success|error&api_key=<id>&since=&until=&limit
 `prompt/completion/total/cached_tokens`、`routes[]`、`winner_*`。
 `model` 为模糊匹配，`since`/`until` 接受 ISO 时间。
 
+管理员展开日志后可通过 `GET /api/admin/logs/{id}/messages` 读取该请求的聊天内容。返回的 `snapshot.messages` 按请求顺序保存，`snapshot.total` 是请求传入的消息总数。历史日志没有快照时返回 `{"snapshot": null}`。设置项 `log_message_limit` 默认为 50，设为 0 保存全部消息，对新请求生效。
+
 ## 日志清理
 
+`log_retention_days` 默认为 30 天，0 表示永久保存。读写请求日志时每小时最多清理一次，清理时同时删除聊天快照。
+
 ```
-python manage.py clean_logs --days 30     # 删除 30 天前日志
+python manage.py clean_logs               # 使用面板设置的保留天数
+python manage.py clean_logs --days 30     # 本次手动删除 30 天前日志
 python manage.py clean_logs --keep 100000 # 只保留最近 10 万条
 ```
 

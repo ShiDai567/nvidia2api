@@ -48,4 +48,5 @@ urlpatterns = [
     path("api/admin/api-keys/<int:pk>", admin_views.UserApiKeyDetailView.as_view()),
 
     path("api/admin/logs", admin_views.LogListView.as_view()),
+    path("api/admin/logs/<int:pk>/messages", admin_views.LogMessagesView.as_view()),
 ]

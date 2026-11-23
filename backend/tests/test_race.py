@@ -1,5 +1,5 @@
 import asyncio
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from django.test import TestCase
 
@@ -146,6 +146,18 @@ class RaceTests(TestCase):
 
 
 class StreamRaceTests(TestCase):
+    def test_simultaneous_ready_streams_close_every_loser(self):
+        routes = [make_route("local", i) for i in range(3)]
+        contexts = {r.name: AsyncMock() for r in routes}
+
+        async def ready(route, body, base_url):
+            return (None, contexts[route.name], None, None, "data: [DONE]"), None
+
+        with patch.object(race_engine, "_stream_first_valid", ready):
+            winner, *_ = asyncio.run(race_engine.race_stream_winner(routes, {}, "http://local"))
+        for name, cm in contexts.items():
+            self.assertEqual(cm.__aexit__.await_count, int(name != winner.name))
+
     def test_first_valid_stream_wins_rest_cancelled(self):
         from services import race_engine
 

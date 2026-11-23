@@ -159,6 +159,8 @@ class RequestLog(models.Model):
     first_token_ms = models.FloatField(null=True, blank=True)  # 首 chunk 耗时（TTFT）
     # Full per-route outcome of the race: winner / failed / cancelled
     routes = models.JSONField(default=list, blank=True)
+    # 旧记录没有聊天快照，保留 NULL 以便详情页区分。
+    chat_snapshot = models.JSONField(null=True, blank=True)
 
     class Meta:
         db_table = "request_log"

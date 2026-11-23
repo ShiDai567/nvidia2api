@@ -16,6 +16,7 @@ from services import api_key_service, key_service, sysconfig
 from services.content_review import StreamContentReviewer, review_payload, review_text
 from services.load_balancer import build_routes
 from services.loop import run_coroutine, submit_coroutine
+from services.request_logs import create_log
 from services.race_engine import (
     AllRoutesFailed, NoRouteAvailable, race_chat,
 )
@@ -138,7 +139,7 @@ def _execute_chat(request, user_key, body, model_name, response_model):
 
     request_id = key_service.new_request_id()
     routes = build_routes()
-    log = RequestLog.objects.create(
+    log = create_log(body["messages"],
         request_id=request_id, user_api_key=user_key, model=model_name,
         routes_count=len(routes), is_stream=stream,
     )
