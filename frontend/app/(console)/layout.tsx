@@ -80,13 +80,21 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
           })}
         </nav>
 
-        <div className="border-l border-white/5 px-2 md:w-full md:border-l-0 md:border-t md:p-3">
+        <div className="flex shrink-0 items-center border-l border-white/5 px-2 md:w-full md:flex-col md:items-start md:border-l-0 md:border-t md:p-3">
+          <span
+            className="max-w-24 truncate font-mono text-xs text-gray-400 md:mb-1 md:max-w-full md:px-3"
+            title={`当前版本 ${process.env.NEXT_PUBLIC_APP_VERSION}`}
+          >
+            <span className="sr-only md:not-sr-only">版本 </span>
+            {process.env.NEXT_PUBLIC_APP_VERSION}
+          </span>
           <button
+            aria-label="退出登录"
             onClick={() => {
               clearToken();
               router.replace("/login");
             }}
-            className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-400 transition-colors hover:bg-red-500/10 hover:text-red-400"
+            className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-400 transition-colors hover:bg-red-500/10 hover:text-red-400 md:w-full"
           >
             <LogOut size={16} />
             <span className="hidden md:inline">退出登录</span>

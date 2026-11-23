@@ -60,6 +60,8 @@ cd backend && uv run pytest tests
 
 ## Docker 一体化
 
+管理面板导航栏显示当前构建的版本。GitLab 发布镜像显示发布标签，本地开发时从 Git 读取版本。自行构建镜像时可通过 `--build-arg APP_VERSION=版本号` 指定显示值，缺少版本信息时显示 `dev`。
+
 运行环境变量直接配置在 `docker-compose.yml` 的 `environment` 中，无需创建 `.env` 文件。启动前修改其中的 `SECRET_KEY`、`ADMIN_PASSWORD` 和 `ADMIN_TOKEN`；数据目录保持容器路径 `/app/data` 和 `/app/data/db.sqlite3`，通过卷挂载持久化到宿主机 `./data`。
 
 镜像通过显式 `ENTRYPOINT` 使用 `/bin/sh` 执行独立脚本 `docker/start.sh`（镜像内为 `/app/start.sh`），只使用 POSIX sh 语法，无需 `wait -n` 或 Bash。先验证 Nginx 配置，数据库迁移成功后启动 Django、Next.js 和 Nginx；脚本每秒检查服务状态，任一服务退出时会停止其余服务并以失败状态退出，交给容器重启策略恢复。收到容器停止信号时会转发给三个服务并等待它们退出。

@@ -36,7 +36,7 @@ GET /health  →  {"status": "ok"}
 
 | 端点 | 说明 |
 |---|---|
-| `GET /api/admin/dashboard` | keys/proxies/models/请求数/成功率/延迟/今日 tokens/实时并发 + key_status、proxy_status 分布 |
+| `GET /api/admin/dashboard` | keys/proxies/models/请求数/成功率/延迟/今日 tokens；`active_requests` 为完整对话执行数，`queued_requests` 为等待数，`concurrent_limit` 为当前动态并发上限；另含 key_status、proxy_status 分布 |
 | `GET /api/admin/dashboard/usage?days=7` | 按天的 token 明细（prompt/completion/total + 请求数，按本地时区分桶） |
 | `GET/PATCH /api/admin/settings` | 运行参数。GET 返回 `[{key,type,value,default,description}]`；PATCH body `{settings:{key:value,...}}` |
 | `GET/POST /api/admin/content-review-rules` | 内容替换规则列表 / 新增 `{forbidden_text,replacement_text,enabled?}` |

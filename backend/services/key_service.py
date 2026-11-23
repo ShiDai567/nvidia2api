@@ -83,6 +83,8 @@ def available_keys() -> list[NvidiaApiKey]:
     qs = NvidiaApiKey.objects.all()
     out = []
     for k in qs:
+        if k.rpm_limit <= 0:
+            continue
         if k.status in (NvidiaApiKeyStatus.DISABLED, NvidiaApiKeyStatus.INVALID):
             continue
         if k.cooldown_until and k.cooldown_until > now:

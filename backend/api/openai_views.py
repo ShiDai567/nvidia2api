@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import logging
-import threading
 import time
 from concurrent.futures import Future
 
@@ -19,11 +18,10 @@ from services.loop import run_coroutine, submit_coroutine
 from services.race_engine import (
     AllRoutesFailed, NoRouteAvailable, race_chat,
 )
+from services.request_queue import QueueFull, QueueTimeout, cached_capacity_snapshot, request_queue
 from .auth import openai_error
 
 logger = logging.getLogger("nvidia2api.openai")
-
-_request_semaphore = threading.BoundedSemaphore(settings.MAX_CONCURRENT_REQUESTS)
 
 
 def _authenticate(request):
@@ -65,7 +63,42 @@ ALLOWED_PARAMS = {
 
 
 @csrf_exempt
-def chat_completions(request):
+async def chat_completions(request):
+    import asyncio
+
+    from asgiref.sync import sync_to_async
+
+    arrived_at = time.monotonic()
+    prepared = await sync_to_async(_prepare_chat)(request)
+    if not isinstance(prepared, tuple):
+        return prepared
+
+    async def snapshot():
+        return await sync_to_async(cached_capacity_snapshot)()
+
+    try:
+        lease = await request_queue.acquire(arrived_at, snapshot)
+    except (QueueFull, QueueTimeout) as exc:
+        code = "queue_full" if isinstance(exc, QueueFull) else "queue_timeout"
+        response = openai_error("请求队列已满" if code == "queue_full" else "请求排队超时",
+                                code, 429)
+        response["Retry-After"] = "1"
+        return response
+
+    # 同步竞速无法被取消强行终止，断开时等其返回后关闭资源并归还名额。
+    task = asyncio.create_task(sync_to_async(_execute_chat)(request, prepared, lease))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        try:
+            response = await task
+            await sync_to_async(response.close)()
+        finally:
+            lease.release()
+        raise
+
+
+def _prepare_chat(request):
     if request.method != "POST":
         return openai_error("Method not allowed", "method_not_allowed", 405)
 
@@ -102,8 +135,27 @@ def chat_completions(request):
             f"The model '{model_name}' is not allowed for this API key",
             "model_not_allowed", 403, "invalid_request_error")
 
-    # Rate-limit only after the request shape is known-good, so bad requests
-    # don't burn the caller's quota.
+    from apps.core.models import NvidiaApiKey, NvidiaApiKeyStatus
+
+    if not NvidiaApiKey.objects.exclude(status__in=[
+        NvidiaApiKeyStatus.DISABLED, NvidiaApiKeyStatus.INVALID
+    ]).filter(rpm_limit__gt=0).exists():
+        return openai_error("当前没有可用线路（没有可用的 NVIDIA Key）", "no_available_route", 503)
+    return user_key, body, model_name, response_model
+
+
+def _execute_chat(request, prepared, lease):
+    user_key, body, model_name, response_model = prepared
+    try:
+        return _execute_admitted_chat(request, user_key, body, model_name, response_model, lease)
+    finally:
+        # 流式响应将名额交给完整流生命周期；其他路径（包括异常）立即归还。
+        if not lease.stream_owned:
+            lease.release()
+
+
+def _execute_admitted_chat(request, user_key, body, model_name, response_model, lease):
+    # 排队期间不消耗用户或 NVIDIA 的 RPM 配额，准入后重新检查用户状态。
     ok, reason = api_key_service.check_and_count(user_key)
     if not ok:
         if reason == "rate_limited":
@@ -113,60 +165,54 @@ def chat_completions(request):
             resp = openai_error("API key disabled", "key_disabled", 403, "authentication_error")
         return resp
 
-    if not _request_semaphore.acquire(blocking=False):
-        resp = openai_error("Server busy, too many concurrent requests",
-                            "server_overloaded", 429)
-        resp["Retry-After"] = "1"
-        return resp
-    log = None
-    try:
-        stream = bool(body.get("stream"))
-        upstream_body = {k: v for k, v in body.items() if k in ALLOWED_PARAMS and v is not None}
+    stream = bool(body.get("stream"))
+    upstream_body = {k: v for k, v in body.items() if k in ALLOWED_PARAMS and v is not None}
 
-        request_id = key_service.new_request_id()
-        routes = build_routes()
-        log = RequestLog.objects.create(
-            request_id=request_id, user_api_key=user_key, model=model_name,
-            routes_count=len(routes), is_stream=stream,
-        )
-        started = time.monotonic()
+    request_id = key_service.new_request_id()
+    routes = build_routes()
+    log = RequestLog.objects.create(
+        request_id=request_id, user_api_key=user_key, model=model_name,
+        routes_count=len(routes), is_stream=stream,
+    )
+    started = time.monotonic()
 
-        if not routes:
-            api_key_service.record_result(user_key, False)
-            _finish_log(log, started, False, 503, "no_available_route")
-            return _with_request_id(
-                openai_error("当前没有可用线路（没有可用的 NVIDIA Key）",
-                             "no_available_route", 503), request_id)
+    if not routes:
+        api_key_service.record_result(user_key, False)
+        _finish_log(log, started, False, 503, "no_available_route")
+        return _with_request_id(
+            openai_error("当前没有可用线路（没有可用的 NVIDIA Key）",
+                         "no_available_route", 503), request_id)
 
-        if stream:
-            return _stream_response(routes, upstream_body, log, started,
+    if stream:
+        response = _stream_response(routes, upstream_body, log, started,
                                     request_id, user_key, is_asgi=hasattr(request, "scope"),
-                                    response_model=response_model)
+                                    response_model=response_model, on_close=lease.release)
+        if response.streaming:
+            lease.stream_owned = True
+        return response
 
-        try:
-            result = race_chat(routes, upstream_body, settings.NVIDIA_BASE_URL)
-        except NoRouteAvailable:
-            api_key_service.record_result(user_key, False)
-            _finish_log(log, started, False, 503, "no_available_route")
-            return _with_request_id(openai_error("当前没有可用线路", "no_available_route", 503),
-                                    request_id)
-        except AllRoutesFailed as exc:
-            api_key_service.record_result(user_key, False)
-            _finish_log(log, started, False, 502, "all_routes_failed", routes=exc.report)
-            return _with_request_id(
-                openai_error(f"所有线路均失败: {exc}", "upstream_error", 502), request_id)
+    try:
+        result = race_chat(routes, upstream_body, settings.NVIDIA_BASE_URL)
+    except NoRouteAvailable:
+        api_key_service.record_result(user_key, False)
+        _finish_log(log, started, False, 503, "no_available_route")
+        return _with_request_id(openai_error("当前没有可用线路", "no_available_route", 503),
+                                request_id)
+    except AllRoutesFailed as exc:
+        api_key_service.record_result(user_key, False)
+        _finish_log(log, started, False, 502, "all_routes_failed", routes=exc.report)
+        return _with_request_id(
+            openai_error(f"所有线路均失败: {exc}", "upstream_error", 502), request_id)
 
-        r = result.route
-        usage = (result.payload or {}).get("usage") or {}
-        _finish_log(log, started, True, result.http_status, "", route_kind=r.kind,
-                    key_name=r.key.name, proxy_name=r.proxy.name if r.proxy else "",
-                    proxy_ip=(r.proxy.public_ip if r.proxy else ""),
-                    usage=usage, routes=result.report or [])
-        api_key_service.record_result(user_key, True)
-        payload = {**result.payload, "model": response_model}
-        return _with_request_id(JsonResponse(review_payload(payload), status=200), request_id)
-    finally:
-        _request_semaphore.release()
+    r = result.route
+    usage = (result.payload or {}).get("usage") or {}
+    _finish_log(log, started, True, result.http_status, "", route_kind=r.kind,
+                key_name=r.key.name, proxy_name=r.proxy.name if r.proxy else "",
+                proxy_ip=(r.proxy.public_ip if r.proxy else ""),
+                usage=usage, routes=result.report or [])
+    api_key_service.record_result(user_key, True)
+    payload = {**result.payload, "model": response_model}
+    return _with_request_id(JsonResponse(review_payload(payload), status=200), request_id)
 
 
 def _with_request_id(resp, request_id: str):
@@ -191,7 +237,7 @@ def _with_stream_model(chunk: str, model_name: str) -> str:
 
 
 def _stream_response(routes, upstream_body, log, started, request_id, user_key, *, is_asgi=True,
-                     response_model=None):
+                     response_model=None, on_close=None):
     """Streaming with correct HTTP semantics: the race is resolved BEFORE the
     response object is returned, so callers get a real status code:
     502/503 with an OpenAI-style JSON error when every route fails, and 200 +
@@ -258,13 +304,29 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key, 
     log.save()
     api_key_service.record_result(user_key, True)
 
-    def save_usage(usage):
+    def save_usage(usage, error_type=""):
         log.duration_ms = round((time.monotonic() - started) * 1000, 1)
         log.prompt_tokens = usage.get("prompt_tokens", 0) or 0
         log.completion_tokens = usage.get("completion_tokens", 0) or 0
         log.total_tokens = usage.get("total_tokens", 0) or 0
         log.cached_tokens = (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0) or 0
-        log.save()
+        if error_type:
+            log.status = "error"
+            log.http_status = 499 if error_type == "client_disconnected" else 502
+            log.error_type = error_type
+        log.save(update_fields=[
+            "duration_ms", "prompt_tokens", "completion_tokens", "total_tokens", "cached_tokens",
+            "status", "http_status", "error_type",
+        ])
+
+    def save_usage_in_worker(usage, error_type=""):
+        from django.db import connections
+
+        try:
+            save_usage(usage, error_type)
+        finally:
+            # asyncio 的线程池不经过 Django 请求结束钩子，显式释放该线程连接。
+            connections.close_all()
 
     def extract_usage(chunk, usage):
         try:
@@ -282,8 +344,26 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key, 
                       "param": None, "code": "stream_error"}
         }) + "\n\n"
 
+    stream_started = False
+
+    def close_unstarted_stream():
+        if stream_started:
+            return
+        try:
+            save_usage({}, "client_disconnected")
+        finally:
+            try:
+                run_coroutine(w.close())
+            finally:
+                if on_close:
+                    on_close()
+
     def sync_gen():
+        nonlocal stream_started
+        stream_started = True
         usage = {}
+        finalized = False
+        error_type = "client_disconnected"
         iterator = w.lines().__aiter__()
 
         async def next_chunk():
@@ -295,42 +375,85 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key, 
                 if chunk is SENTINEL:
                     break
                 usage = extract_usage(chunk, usage)
+                # 下游通常在收到结束标记后立即关闭，不会再拉取一次迭代。
+                if chunk.strip() == "data: [DONE]":
+                    save_usage(usage)
+                    finalized = True
+                    yield from outgoing_chunks(chunk)
+                    return
                 yield from outgoing_chunks(chunk)
             save_usage(usage)
+            finalized = True
         except Exception as exc:  # noqa: BLE001
+            error_type = "stream_error"
             logger.exception("stream pump failed")
-            _finish_log(log, started, False, 502, "stream_error")
+            save_usage(usage, error_type)
+            finalized = True
             yield error_chunk(exc)
             yield "data: [DONE]\n\n"
         finally:
-            run_coroutine(w.close())
+            try:
+                if not finalized:
+                    save_usage(usage, error_type)
+            finally:
+                try:
+                    run_coroutine(w.close())
+                finally:
+                    if on_close:
+                        on_close()
 
     async def _send(response_queue, response_loop, item):
         pending = asyncio.run_coroutine_threadsafe(response_queue.put(item), response_loop)
-        await asyncio.wrap_future(pending)
+        try:
+            await asyncio.wrap_future(pending)
+        except asyncio.CancelledError:
+            pending.cancel()
+            raise
 
     async def _pump():
         usage: dict = {}
+        finalized = False
+        error_type = "client_disconnected"
         response_queue, response_loop = await asyncio.wrap_future(queue_ready)
         try:
             async for chunk in w.lines():
                 usage = extract_usage(chunk, usage)
+                if chunk.strip() == "data: [DONE]":
+                    await asyncio.to_thread(save_usage_in_worker, usage)
+                    finalized = True
+                    for outgoing in outgoing_chunks(chunk):
+                        await _send(response_queue, response_loop, outgoing)
+                    break
                 for outgoing in outgoing_chunks(chunk):
                     await _send(response_queue, response_loop, outgoing)
+            if not finalized:
+                await asyncio.to_thread(save_usage_in_worker, usage)
+                finalized = True
         except Exception as exc:  # noqa: BLE001
+            error_type = "stream_error"
             logger.exception("stream pump failed")
+            await asyncio.to_thread(save_usage_in_worker, usage, error_type)
+            finalized = True
             await _send(response_queue, response_loop, SENTINEL)
             await _send(response_queue, response_loop, exc)
             return
         finally:
-            await w.close()
+            try:
+                if not finalized:
+                    # 保存由生产者负责，避免请求事件循环取消后丢失已读用量。
+                    await asyncio.to_thread(save_usage_in_worker, usage, error_type)
+            finally:
+                try:
+                    await w.close()
+                finally:
+                    if on_close:
+                        on_close()
         await _send(response_queue, response_loop, SENTINEL)
         await _send(response_queue, response_loop, usage)
 
     async def async_gen():
-        from asgiref.sync import sync_to_async
-
-        usage: dict = {}
+        nonlocal stream_started
+        stream_started = True
         response_queue = asyncio.Queue(maxsize=1)
         pump_task = submit_coroutine(_pump())
         queue_ready.set_result((response_queue, asyncio.get_running_loop()))
@@ -340,16 +463,11 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key, 
                 if item is SENTINEL:
                     nxt = await response_queue.get()
                     if isinstance(nxt, Exception):
-                        await sync_to_async(_finish_log, thread_sensitive=True)(
-                            log, started, False, 502, "stream_error"
-                        )
                         yield error_chunk(nxt)
                         yield "data: [DONE]\n\n"
                         return
-                    usage = nxt or {}
                     break
                 yield item
-            await sync_to_async(save_usage, thread_sensitive=True)(usage)
         finally:
             if not pump_task.done():
                 pump_task.cancel()
@@ -357,6 +475,7 @@ def _stream_response(routes, upstream_body, log, started, request_id, user_key, 
     response = StreamingHttpResponse(
         async_gen() if is_asgi else sync_gen(), content_type="text/event-stream"
     )
+    response._resource_closers.append(close_unstarted_stream)
     # /v1 同样经过 Next.js 反代，避免 gzip 将流式分片缓冲到结束。
     response["Cache-Control"] = "no-cache, no-transform"
     response["X-Accel-Buffering"] = "no"

@@ -486,16 +486,16 @@ class DashboardView(AdminRequiredMixin, APIView):
             "success_rate": round(success_count / today_count * 100, 1) if today_count else 0.0,
             "avg_latency_s": round((agg["avg_ms"] or 0) / 1000, 2),
             "tokens_today": agg["total_tokens"] or 0,
-            "active_requests": settings.MAX_CONCURRENT_REQUESTS - _request_semaphore_free(),
+            **_request_queue_stats(),
             "key_status": key_status,
             "proxy_status": proxy_status,
         })
 
 
-def _request_semaphore_free() -> int:
-    from api.openai_views import _request_semaphore
-    with _request_semaphore._cond:
-        return _request_semaphore._value
+def _request_queue_stats() -> dict:
+    from services.request_queue import capacity_snapshot, request_queue
+
+    return {**request_queue.stats(), "concurrent_limit": capacity_snapshot()[0]}
 
 
 class SettingsView(AdminRequiredMixin, APIView):

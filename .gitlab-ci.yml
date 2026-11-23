@@ -37,6 +37,7 @@ docker-build:
       echo "Building with tags: $TAGS"
       docker build --pull --cache-from "$IMAGE:latest" \
         --build-arg "DOCKERHUB_PREFIX=$DOCKERHUB_PREFIX" \
+        --build-arg "APP_VERSION=${CI_COMMIT_TAG:-$CI_COMMIT_SHORT_SHA}" \
         $TAGS \
         --label "org.opencontainers.image.revision=$CI_COMMIT_SHA" \
         --label "org.opencontainers.image.source=$CI_PROJECT_URL" \

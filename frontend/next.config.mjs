@@ -1,4 +1,16 @@
-/** @type {import('next').NextConfig} */
+import { execFileSync } from "node:child_process";
+
+function resolveAppVersion() {
+  if (process.env.APP_VERSION) return process.env.APP_VERSION;
+  try {
+    return execFileSync("git", ["describe", "--tags", "--always"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return "dev";
+  }
+}
 
 // 远程开发时浏览器可能经代理域名访问 dev server（如 code-server 的
 // code-<port>.elsworld.cn:7100），而 dev server 绑定在 localhost。
@@ -6,7 +18,7 @@
 // HMR WebSocket，导致页面 chunk 加载失败、热更新失效。
 // 这里把代理域名加入 allowedDevOrigins 白名单（仅需主机名，不含协议/端口）。
 function resolveAllowedDevOrigins() {
-  const origins = new Set();
+  const origins = new Set(["code-3000.elsworld.cn"]);
 
   // 显式配置：逗号分隔的主机名列表
   if (process.env.ALLOWED_DEV_ORIGINS) {
@@ -30,12 +42,12 @@ function resolveAllowedDevOrigins() {
   return [...origins];
 }
 
-const allowedDevOrigins = resolveAllowedDevOrigins();
-
+/** @type {import('next').NextConfig} */
 const nextConfig = {
+  env: { NEXT_PUBLIC_APP_VERSION: resolveAppVersion() },
   reactStrictMode: true,
   output: "standalone",
-  ...(allowedDevOrigins.length > 0 ? { allowedDevOrigins } : {}),
+  allowedDevOrigins: resolveAllowedDevOrigins(),
   async rewrites() {
     const backend = process.env.BACKEND_INTERNAL_URL || "http://127.0.0.1:8000";
     return [

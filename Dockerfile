@@ -11,6 +11,7 @@ RUN npm ci
 COPY frontend/ .
 # 确保 public 目录存在（Git 不跟踪空目录，frontend/public 可能为空）
 RUN mkdir -p public && touch public/.gitkeep
+ARG APP_VERSION
 RUN npm run build
 
 # Stage 2: Python runtime (Django 6 requires Python 3.12+)

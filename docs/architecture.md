@@ -27,6 +27,7 @@ NVIDIA2API 是面向 NVIDIA AI API 的聚合代理平台：
 │  proxy_service    代理启用限制 │
 │  proxy_checker    并发测速/IP  │
 │  load_balancer    线路构建     │
+│  request_queue    FIFO 动态准入 │
 │  race_engine      竞速执行     │
 │  loop             共享事件循环  │
 │  api_key_service        用户Key│
@@ -43,7 +44,7 @@ NVIDIA2API 是面向 NVIDIA AI API 的聚合代理平台：
 Docker 单镜像以 Nginx `:3000` 为入口，`/api`、`/v1` 和 `/health` 直接转发到 Django `127.0.0.1:8000`，页面转发到 Next.js `127.0.0.1:3001`。API 关闭响应缓冲，读写空闲超时为 180 秒，避免经 Next.js 反代时默认 30 秒超时中断慢请求。本地开发和测试保留 Next.js rewrites。配置及进程管理见 [deployment.md](deployment.md)。
 
 1. **业务不落 View**：`api/*` 只做参数校验与响应拼装，业务都在 `services/`。
-2. **同步视图 + 共享后台事件循环**：竞速在常驻后台线程的单一 event loop 上执行（`services/loop.py`），httpx 连接按代理维度池化、跨请求复用（TCP+TLS 免重复握手）；视图保持同步，避免 ASGI 迁移复杂度。
+2. **异步准入 + 共享后台事件循环**：聊天入口异步排队，数据库操作与竞速入口在线程中执行；竞速在常驻后台线程的单一 event loop 上运行（`services/loop.py`），httpx 连接按代理维度池化、跨请求复用。ASGI 排队不占用执行线程，流式名额保持到上游结束或断开清理完成。
 3. **SQLite 并发控制**：启用 WAL 与 IMMEDIATE 短事务；用户/NVIDIA Key 的配额使用条件 UPDATE，Key/代理/用户结果计数使用数据库原子递增，减少读后写的锁升级冲突和丢计数（详见 [database.md](database.md)）。
 4. **运行时参数优先于环境变量**：`SystemSetting` 表中的值覆盖 `.env`，改后即时生效（`sysconfig.py`）。
 5. **直连数可配置**：`direct_routes_per_request` 默认 1，至少 1；线路数受可调度代理数、配置直连数、可用 Key 和总线路上限约束。后端 `set_enabled` 强制代理上限为 `max(未禁用 Key 数 − 配置直连数, 0)`，调度优先为直连预留名额。
@@ -56,12 +57,13 @@ POST /v1/chat/completions
   验证 Bearer（UserApiKey, sha256）
   验证 body/model（400/404 不消耗配额）
   验证 allowed_models 白名单（若配置）
+  按到达时间 FIFO 排队（动态容量 = 可调度 Key 数 ÷ 单次计划线路数，受平台上限约束）
   用户 Key 限流（rate_limit>0 才计数；429 带 Retry-After）
-  全局并发信号量
   build_routes() → [直连+Key]*D + [代理+Key]*P
   race (asyncio.FIRST_COMPLETED, 共享 loop + 连接池)
     ├ 首个"有效响应"判定 Winner（见 race-engine.md）
     ├ 其余任务 cancel + 连接归还连接池
     └ 写 RequestLog（含每条线路明细）
   返回用户（SSE 或 JSON，含 X-Request-Id）
+  完整对话结束/断开后归还执行名额
 ```

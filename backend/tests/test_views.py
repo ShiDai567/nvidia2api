@@ -218,7 +218,7 @@ class OpenAIStreamingASGITests(TransactionTestCase):
             winner_route_type="", winner_key_name="", winner_proxy_name="",
             proxy_public_ip="", status="", http_status=0, first_token_ms=0,
             routes=[], duration_ms=0, prompt_tokens=0, completion_tokens=0,
-            total_tokens=0, cached_tokens=0, save=lambda: None,
+            total_tokens=0, cached_tokens=0, save=lambda **kwargs: None,
         )
         async def consume_one():
             iterator = response.streaming_content
@@ -521,9 +521,10 @@ class AdminChatViewTests(TestCase):
             )
 
         stream = iter(response.streaming_content)
-        next(stream)  # Keep-alive
-        next(stream)  # Route metadata
-        first_text_chunk = next(stream).decode()
+        # 竞速若立即完成可省略保活帧，按内容识别首个文本分片。
+        first_text_chunk = next(
+            chunk.decode() for chunk in stream if b'"content"' in chunk
+        )
         self.assertIn('"content": "I am Google "', first_text_chunk)
         self.assertFalse(release.done())
         release.set_result(None)
